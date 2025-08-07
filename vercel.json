@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "name": "bolddesk-hudu-middleware",
+  "builds": [
+    {
+      "src": "server.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/bolddesk-webhook",
+      "dest": "/server.js",
+      "methods": ["POST"]
+    },
+    {
+      "src": "/health",
+      "dest": "/server.js",
+      "methods": ["GET"]
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/server.js"
+    }
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  }
+}
