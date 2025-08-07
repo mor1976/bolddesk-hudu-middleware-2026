@@ -52,6 +52,31 @@ if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
         console.log(`❤️  Health: http://localhost:${PORT}/health`);
     });
 }
-
+// Test endpoint for development
+app.get('/test/:email', async (req, res) => {
+    try {
+        const email = req.params.email;
+        console.log(`Testing with email: ${email}`);
+        
+        const testHTML = `
+            <div style="padding: 20px; font-family: Arial, sans-serif;">
+                <h2>🧪 בדיקת חיבור</h2>
+                <p><strong>מייל שנבדק:</strong> ${email}</p>
+                <p><strong>סטטוס:</strong> השרת קיבל את הבקשה!</p>
+                <p><strong>הצעד הבא:</strong> חיבור ל-Hudu API</p>
+            </div>
+        `;
+        
+        res.json({ 
+            email: email,
+            status: 'success',
+            html: testHTML,
+            message: 'Test endpoint working'
+        });
+    } catch (error) {
+        console.error('Test error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
 // Export for Vercel
 module.exports = app;
