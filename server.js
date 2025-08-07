@@ -43,15 +43,6 @@ app.post('/bolddesk-webhook', async (req, res) => {
         res.status(500).json({ error: 'Server error' });
     }
 });
-
-// Start server (for local development)
-if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
-    app.listen(PORT, () => {
-        console.log(`🚀 Server running on http://localhost:${PORT}`);
-        console.log(`📝 Webhook: http://localhost:${PORT}/bolddesk-webhook`);
-        console.log(`❤️  Health: http://localhost:${PORT}/health`);
-    });
-}
 // Test endpoint for development
 app.get('/test/:email', async (req, res) => {
     try {
@@ -77,6 +68,17 @@ app.get('/test/:email', async (req, res) => {
         console.error('Test error:', error);
         res.status(500).json({ error: error.message });
     }
+});
+
+// Start server (for local development)
+if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    app.listen(PORT, () => {
+        console.log(`🚀 Server running on http://localhost:${PORT}`);
+        console.log(`📝 Webhook: http://localhost:${PORT}/bolddesk-webhook`);
+        console.log(`❤️  Health: http://localhost:${PORT}/health`);
+    });
+}
+// Test endpoint for development }
 });
 // Export for Vercel
 module.exports = app;
