@@ -27,8 +27,6 @@ app.get('/health', (req, res) => {
 // Main endpoint for BoldDesk webhook
 app.post('/bolddesk-webhook', async (req, res) => {
     try {
-        console.log('Received request from BoldDesk');
-        
         const testHTML = `
             <div style="padding: 20px; font-family: Arial, sans-serif;">
                 <h2>🎉 החיבור עובד!</h2>
@@ -44,105 +42,24 @@ app.post('/bolddesk-webhook', async (req, res) => {
     }
 });
 
-// Test endpoint for development - מתוקן!
-app.get('/test/:email', async (req, res) => {
-    try {
-        const email = req.params.email;
-        console.log(`Testing with email: ${email}`);
-        
-        // בדיקה שיש API Keys
-        if (!HUDU_API_KEY || !HUDU_BASE_URL) {
-            return res.status(400).json({
-                email: email,
-                error: 'Missing Hudu API configuration',
-                message: 'Hudu API Key או Base URL לא מוגדרים'
-            });
-        }
-        
-        // חיפוש חברות ב-Hudu
-        const companiesResponse = await axios.get(`${HUDU_BASE_URL}/api/v1/companies`, {
-            headers: {
-                'x-api-key': HUDU_API_KEY,
-                'Content-Type': 'application/json'
-            }
-        });
-        
-        const companies = companiesResponse.data.companies || [];
-        console.log(`Found ${companies.length} companies`);
-        
-        let foundClient = null;
-        let foundAssets = [];
-        let searchResults = [];
-        
-        // חיפוש במס' מוגבל של חברות (למניעת timeout)
-        const maxCompaniesToSearch = Math.min(companies.length, 10);
-        
-        for (let i = 0; i < maxCompaniesToSearch; i++) {
-            const company = companies[i];
-            try {
-                const assetsResponse = await axios.get(`${HUDU_BASE_URL}/api/v1/companies/${company.id}/assets`, {
-                    headers: {
-                        'x-api-key': HUDU_API_KEY,
-                        'Content-Type': 'application/json'
-                    },
-                    timeout: 5000 // 5 second timeout
-                });
-                
-                const assets = assetsResponse.data.assets || [];
-                searchResults.push(`${company.name}: ${assets.length} assets`);
-                
-                // חיפוש אנשים עם מייל תואם
-                const matchingAssets = assets.filter(asset => {
-                    if (asset.fields) {
-                        // חיפוש בכל השדות
-                        const fieldsStr = JSON.stringify(asset.fields).toLowerCase();
-                        return fieldsStr.includes(email.toLowerCase());
-                    }
-                    return false;
-                });
-                
-                if (matchingAssets.length > 0) {
-                    foundClient = company;
-                    foundAssets = assets;
-                    console.log(`Found match in ${company.name}`);
-                    break;
-                }
-                
-            } catch (assetError) {
-                searchResults.push(`${company.name}: Error - ${assetError.message}`);
-                console.log(`Error with ${company.name}:`, assetError.message);
-            }
-        }
-        
-        res.json({
-            email: email,
-            status: 'success',
-            client_found: foundClient ? foundClient.name : null,
-            companies_searched: maxCompaniesToSearch,
-            total_companies: companies.length,
-            assets_in_found_company: foundAssets.length,
-            search_results: searchResults.slice(0, 5), // First 5 results
-            hudu_connected: true,
-            message: foundClient ? `✅ נמצא לקוח: ${foundClient.name}` : `❌ לא נמצא לקוח עם מייל ${email}`
-        });
-        
-    } catch (error) {
-        console.error('Test error:', error.message);
-        res.status(500).json({ 
-            email: req.params.email,
-            error: error.message,
-            hudu_url: HUDU_BASE_URL,
-            message: 'שגיאה בחיבור ל-Hudu'
-        });
-    }
+// Simple test endpoint
+app.get('/test/:email', (req, res) => {
+    const email = req.params.email;
+    
+    res.json({
+        email: email,
+        status: 'success',
+        message: 'Test endpoint working',
+        hudu_api_key: HUDU_API_KEY ? 'Set' : 'Missing',
+        hudu_url: HUDU_BASE_URL || 'Missing',
+        timestamp: new Date().toISOString()
+    });
 });
 
 // Start server (for local development)
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
     app.listen(PORT, () => {
-        console.log(`🚀 Server running on http://localhost:${PORT}`);
-        console.log(`📝 Webhook: http://localhost:${PORT}/bolddesk-webhook`);
-        console.log(`❤️  Health: http://localhost:${PORT}/health`);
+        console.log(`🚀 Server running on port ${PORT}`);
     });
 }
 
