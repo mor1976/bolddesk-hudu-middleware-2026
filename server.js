@@ -6,8 +6,11 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
+// Middleware - מתוקן לטפל בכל סוגי הנתונים!
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.text());
+app.use(express.raw());
 app.use(cors());
 
 // Configuration
@@ -24,51 +27,89 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Main endpoint for BoldDesk webhook - מתוקן להחזיר HTML!
+// Main endpoint for BoldDesk webhook - מתוקן!
 app.post('/bolddesk-webhook', async (req, res) => {
     try {
-        console.log('Received request from BoldDesk:', req.body);
+        console.log('Received request from BoldDesk');
+        console.log('Headers:', req.headers);
+        console.log('Body type:', typeof req.body);
+        console.log('Body content:', req.body);
         
-        // BoldDesk expects HTML response, not JSON
+        // Try to parse customer email from different possible formats
+        let customerEmail = null;
+        let ticketData = null;
+        
+        try {
+            // If body is string, try to parse as JSON
+            if (typeof req.body === 'string') {
+                ticketData = JSON.parse(req.body);
+            } else if (typeof req.body === 'object') {
+                ticketData = req.body;
+            }
+            
+            // Extract email from various possible locations
+            if (ticketData) {
+                customerEmail = ticketData.customer?.email || 
+                               ticketData.ticket?.customer?.email ||
+                               ticketData.email ||
+                               ticketData.customer_email;
+            }
+        } catch (parseError) {
+            console.log('Parse error:', parseError.message);
+        }
+        
+        console.log('Extracted email:', customerEmail);
+        
+        // Generate HTML response
         const htmlResponse = `
             <div style="padding: 20px; font-family: Arial, sans-serif; max-width: 600px;">
                 <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                    <h2 style="margin: 0; font-size: 24px;">🎉 החיבור ל-Hudu עובד!</h2>
-                    <p style="margin: 5px 0 0 0; opacity: 0.9;">הנתונים נטענים מהמערכת...</p>
+                    <h2 style="margin: 0; font-size: 24px;">🎉 החיבור עובד מעולה!</h2>
+                    <p style="margin: 5px 0 0 0; opacity: 0.9;">השרת קיבל נתונים מ-BoldDesk בהצלחה</p>
                 </div>
                 
                 <div style="background: #f8f9fa; border-radius: 8px; padding: 15px; margin-bottom: 15px;">
                     <h3 style="color: #333; margin-top: 0;">פרטי הבקשה:</h3>
                     <p><strong>זמן:</strong> ${new Date().toLocaleString('he-IL')}</p>
-                    <p><strong>סטטוס:</strong> השרת פעיל ומוכן</p>
-                    <p><strong>Hudu מחובר:</strong> ${HUDU_API_KEY ? '✅ כן' : '❌ לא'}</p>
+                    <p><strong>מייל לקוח:</strong> ${customerEmail || 'לא נמצא'}</p>
+                    <p><strong>סטטוס Hudu:</strong> ${HUDU_API_KEY ? '✅ מחובר' : '❌ לא מחובר'}</p>
                 </div>
                 
-                <div style="background: #e3f2fd; border-left: 4px solid #2196F3; padding: 15px; border-radius: 4px;">
-                    <p style="margin: 0; color: #1565C0;">
-                        <strong>💡 הבא:</strong> השרת יחפש את נכסי הלקוח ב-Hudu ויציג אותם כאן.
+                ${customerEmail ? `
+                <div style="background: #e8f5e8; border-left: 4px solid #4caf50; padding: 15px; border-radius: 4px;">
+                    <p style="margin: 0; color: #2e7d32;">
+                        <strong>✅ נמצא מייל לקוח:</strong> ${customerEmail}<br>
+                        <strong>🔍 הבא:</strong> חיפוש נכסים ב-Hudu למייל הזה
                     </p>
                 </div>
-                
-                <div style="margin-top: 20px; padding: 15px; background: #fff3e0; border-radius: 8px; border-left: 4px solid #ff9800;">
-                    <p style="margin: 0; color: #e65100; font-size: 14px;">
-                        <strong>🔧 מצב פיתוח:</strong> זהו תצוגת בדיקה. בגרסה הסופית יוצגו כאן נכסי הלקוח מ-Hudu.
+                ` : `
+                <div style="background: #fff3e0; border-left: 4px solid #ff9800; padding: 15px; border-radius: 4px;">
+                    <p style="margin: 0; color: #e65100;">
+                        <strong>⚠️ לא נמצא מייל לקוח בנתונים</strong><br>
+                        השרת עובד, אבל צריך לוודא שBoldDesk שולח את פרטי הלקוח
                     </p>
+                </div>
+                `}
+                
+                <div style="margin-top: 20px; padding: 15px; background: #f0f8ff; border-radius: 8px; border: 1px solid #e3f2fd;">
+                    <details style="color: #1565C0;">
+                        <summary style="cursor: pointer; font-weight: bold;">🔧 פרטים טכניים</summary>
+                        <pre style="background: #fff; padding: 10px; border-radius: 4px; overflow: auto; font-size: 12px; margin-top: 10px;">${JSON.stringify(ticketData || req.body, null, 2)}</pre>
+                    </details>
                 </div>
             </div>
         `;
         
-        // BoldDesk expects HTML content, not JSON
         res.set('Content-Type', 'text/html; charset=utf-8');
         res.send(htmlResponse);
         
     } catch (error) {
-        console.error('Error:', error);
+        console.error('Webhook error:', error);
         const errorHTML = `
             <div style="padding: 20px; font-family: Arial, sans-serif;">
                 <div style="background: #ffebee; border: 1px solid #f44336; border-radius: 8px; padding: 15px;">
-                    <h3 style="color: #d32f2f; margin-top: 0;">שגיאה בשרת</h3>
-                    <p style="color: #d32f2f;">אירעה שגיאה בעת עיבוד הבקשה: ${error.message}</p>
+                    <h3 style="color: #d32f2f; margin-top: 0;">שגיאה בעיבוד</h3>
+                    <p style="color: #d32f2f;">שגיאה: ${error.message}</p>
                     <p style="color: #666; font-size: 12px;">זמן: ${new Date().toLocaleString('he-IL')}</p>
                 </div>
             </div>
@@ -78,18 +119,16 @@ app.post('/bolddesk-webhook', async (req, res) => {
     }
 });
 
-// Test endpoint for development
+// Test endpoint
 app.get('/test/:email', (req, res) => {
     const email = req.params.email;
-    
     res.json({
         email: email,
         status: 'success',
         message: 'Test endpoint working',
         hudu_api_key: HUDU_API_KEY ? 'Set' : 'Missing',
         hudu_url: HUDU_BASE_URL || 'Missing',
-        timestamp: new Date().toISOString(),
-        ready_for_bolddesk: true
+        timestamp: new Date().toISOString()
     });
 });
 
@@ -97,9 +136,6 @@ app.get('/test/:email', (req, res) => {
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
     app.listen(PORT, () => {
         console.log(`🚀 Server running on port ${PORT}`);
-        console.log(`📝 Webhook: http://localhost:${PORT}/bolddesk-webhook`);
-        console.log(`❤️  Health: http://localhost:${PORT}/health`);
-        console.log(`🧪 Test: http://localhost:${PORT}/test/email@example.com`);
     });
 }
 
