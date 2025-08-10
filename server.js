@@ -53,17 +53,20 @@ app.post('/bolddesk-webhook', async (req, res) => {
         function findEmail(obj) {
             if (!obj) return null;
             
-            // חיפוש ישיר
+            // חיפוש ישיר - כולל EmailId שBoldDesk שולח!
             if (obj.email) return obj.email;
             if (obj.Email) return obj.Email;
+            if (obj.EmailId) return obj.EmailId;  // הוספנו את זה!
             if (obj.customer_email) return obj.customer_email;
             if (obj.requester_email) return obj.requester_email;
             
-            // חיפוש במבנים מקוננים
+            // חיפוש במבנים מקוננים - כולל requester.EmailId
             if (obj.customer?.email) return obj.customer.email;
             if (obj.Customer?.Email) return obj.Customer.Email;
             if (obj.requester?.email) return obj.requester.email;
+            if (obj.requester?.EmailId) return obj.requester.EmailId;  // הוספנו את זה!
             if (obj.Requester?.Email) return obj.Requester.Email;
+            if (obj.Requester?.EmailId) return obj.Requester.EmailId;  // הוספנו את זה!
             if (obj.ticket?.customer?.email) return obj.ticket.customer.email;
             if (obj.Ticket?.Customer?.Email) return obj.Ticket.Customer.Email;
             if (obj.contact?.email) return obj.contact.email;
