@@ -30,96 +30,197 @@ app.get('/health', (req, res) => {
 // Main endpoint for BoldDesk webhook - מתוקן!
 app.post('/bolddesk-webhook', async (req, res) => {
     try {
-        console.log('Received request from BoldDesk');
-        console.log('Headers:', req.headers);
+        console.log('=== WEBHOOK RECEIVED ===');
+        console.log('Headers:', JSON.stringify(req.headers, null, 2));
         console.log('Body type:', typeof req.body);
-        console.log('Body content:', req.body);
+        console.log('Raw body:', JSON.stringify(req.body, null, 2));
         
         // Try to parse customer email from different possible formats
         let customerEmail = null;
-        let ticketData = null;
+        let ticketData = req.body;
         
-        try {
-            // If body is string, try to parse as JSON
-            if (typeof req.body === 'string') {
-                ticketData = JSON.parse(req.body);
-            } else if (typeof req.body === 'object') {
-                ticketData = req.body;
+        // אם הגוף הוא מחרוזת, ננסה לפרסר אותו
+        if (typeof ticketData === 'string') {
+            try {
+                ticketData = JSON.parse(ticketData);
+                console.log('Parsed string body to JSON');
+            } catch (e) {
+                console.log('Failed to parse string body:', e.message);
             }
-            
-            // Extract email from various possible locations
-            if (ticketData) {
-                customerEmail = ticketData.customer?.email || 
-                               ticketData.ticket?.customer?.email ||
-                               ticketData.email ||
-                               ticketData.customer_email;
-            }
-        } catch (parseError) {
-            console.log('Parse error:', parseError.message);
         }
         
+        // חיפוש מקיף של המייל בכל המבנים האפשריים
+        function findEmail(obj) {
+            if (!obj) return null;
+            
+            // חיפוש ישיר
+            if (obj.email) return obj.email;
+            if (obj.Email) return obj.Email;
+            if (obj.customer_email) return obj.customer_email;
+            if (obj.requester_email) return obj.requester_email;
+            
+            // חיפוש במבנים מקוננים
+            if (obj.customer?.email) return obj.customer.email;
+            if (obj.Customer?.Email) return obj.Customer.Email;
+            if (obj.requester?.email) return obj.requester.email;
+            if (obj.Requester?.Email) return obj.Requester.Email;
+            if (obj.ticket?.customer?.email) return obj.ticket.customer.email;
+            if (obj.Ticket?.Customer?.Email) return obj.Ticket.Customer.Email;
+            if (obj.contact?.email) return obj.contact.email;
+            if (obj.Contact?.Email) return obj.Contact.Email;
+            
+            // חיפוש רקורסיבי בכל המפתחות
+            for (let key in obj) {
+                if (typeof obj[key] === 'object' && obj[key] !== null) {
+                    const found = findEmail(obj[key]);
+                    if (found) return found;
+                }
+            }
+            
+            return null;
+        }
+        
+        customerEmail = findEmail(ticketData);
+        
         console.log('Extracted email:', customerEmail);
+        console.log('Full ticket data structure:', JSON.stringify(ticketData, null, 2));
         
-        // Generate HTML response
-        const htmlResponse = `
-            <div style="padding: 20px; font-family: Arial, sans-serif; max-width: 600px;">
-                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                    <h2 style="margin: 0; font-size: 24px;">🎉 החיבור עובד מעולה!</h2>
-                    <p style="margin: 5px 0 0 0; opacity: 0.9;">השרת קיבל נתונים מ-BoldDesk בהצלחה</p>
-                </div>
-                
-                <div style="background: #f8f9fa; border-radius: 8px; padding: 15px; margin-bottom: 15px;">
-                    <h3 style="color: #333; margin-top: 0;">פרטי הבקשה:</h3>
-                    <p><strong>זמן:</strong> ${new Date().toLocaleString('he-IL')}</p>
-                    <p><strong>מייל לקוח:</strong> ${customerEmail || 'לא נמצא'}</p>
-                    <p><strong>סטטוס Hudu:</strong> ${HUDU_API_KEY ? '✅ מחובר' : '❌ לא מחובר'}</p>
-                </div>
-                
-                ${customerEmail ? `
-                <div style="background: #e8f5e8; border-left: 4px solid #4caf50; padding: 15px; border-radius: 4px;">
-                    <p style="margin: 0; color: #2e7d32;">
-                        <strong>✅ נמצא מייל לקוח:</strong> ${customerEmail}<br>
-                        <strong>🔍 הבא:</strong> חיפוש נכסים ב-Hudu למייל הזה
-                    </p>
-                </div>
-                ` : `
-                <div style="background: #fff3e0; border-left: 4px solid #ff9800; padding: 15px; border-radius: 4px;">
-                    <p style="margin: 0; color: #e65100;">
-                        <strong>⚠️ לא נמצא מייל לקוח בנתונים</strong><br>
-                        השרת עובד, אבל צריך לוודא שBoldDesk שולח את פרטי הלקוח
-                    </p>
-                </div>
-                `}
-                
-                <div style="margin-top: 20px; padding: 15px; background: #f0f8ff; border-radius: 8px; border: 1px solid #e3f2fd;">
-                    <details style="color: #1565C0;">
-                        <summary style="cursor: pointer; font-weight: bold;">🔧 פרטים טכניים</summary>
-                        <pre style="background: #fff; padding: 10px; border-radius: 4px; overflow: auto; font-size: 12px; margin-top: 10px;">${JSON.stringify(ticketData || req.body, null, 2)}</pre>
-                    </details>
-                </div>
-            </div>
-        `;
+        // אם מצאנו מייל, נחפש ב-Hudu
+        let huduAssets = null;
+        if (customerEmail && HUDU_API_KEY && HUDU_BASE_URL) {
+            try {
+                console.log('Searching Hudu for email:', customerEmail);
+                const huduResponse = await axios.get(
+                    `${HUDU_BASE_URL}/api/v1/assets`,
+                    {
+                        headers: {
+                            'x-api-key': HUDU_API_KEY,
+                            'Content-Type': 'application/json'
+                        },
+                        params: {
+                            search: customerEmail
+                        }
+                    }
+                );
+                huduAssets = huduResponse.data;
+                console.log('Hudu search results:', huduAssets);
+            } catch (huduError) {
+                console.error('Hudu search error:', huduError.message);
+            }
+        }
         
-        res.set('Content-Type', 'text/html; charset=utf-8');
-        res.send(htmlResponse);
+        // תמיד מחזירים תגובת JSON תקינה ל-BoldDesk
+        const response = {
+            success: true,
+            message: customerEmail ? 
+                `Customer email found: ${customerEmail}` : 
+                'Webhook received but no customer email found',
+            data: {
+                customerEmail: customerEmail,
+                timestamp: new Date().toISOString(),
+                huduConnected: !!(HUDU_API_KEY && HUDU_BASE_URL),
+                huduAssetsFound: huduAssets?.assets?.length || 0
+            }
+        };
+        
+        console.log('Sending response:', JSON.stringify(response, null, 2));
+        
+        // חשוב: מחזירים JSON ולא HTML ל-BoldDesk
+        res.status(200).json(response);
         
     } catch (error) {
-        console.error('Webhook error:', error);
-        const errorHTML = `
-            <div style="padding: 20px; font-family: Arial, sans-serif;">
-                <div style="background: #ffebee; border: 1px solid #f44336; border-radius: 8px; padding: 15px;">
-                    <h3 style="color: #d32f2f; margin-top: 0;">שגיאה בעיבוד</h3>
-                    <p style="color: #d32f2f;">שגיאה: ${error.message}</p>
-                    <p style="color: #666; font-size: 12px;">זמן: ${new Date().toLocaleString('he-IL')}</p>
-                </div>
-            </div>
-        `;
-        res.set('Content-Type', 'text/html; charset=utf-8');
-        res.status(500).send(errorHTML);
+        console.error('=== WEBHOOK ERROR ===');
+        console.error('Error details:', error);
+        console.error('Stack trace:', error.stack);
+        
+        // גם בשגיאה, מחזירים JSON תקין
+        const errorResponse = {
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString()
+        };
+        
+        res.status(200).json(errorResponse); // שימוש ב-200 גם בשגיאה כדי ש-BoldDesk לא ינסה שוב
     }
 });
 
-// Test endpoint
+// Test endpoint - עם HTML ידידותי לבדיקה
+app.get('/test', (req, res) => {
+    const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>BoldDesk-Hudu Test</title>
+        <style>
+            body { font-family: Arial; padding: 40px; background: #f5f5f5; }
+            .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .status { padding: 15px; border-radius: 5px; margin: 20px 0; }
+            .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+            .warning { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
+            .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+            button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+            button:hover { background: #0056b3; }
+            pre { background: #f8f9fa; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🔧 BoldDesk-Hudu Integration Test</h1>
+            
+            <div class="status ${BOLDDESK_API_KEY ? 'success' : 'warning'}">
+                <strong>BoldDesk API:</strong> ${BOLDDESK_API_KEY ? '✅ Configured' : '⚠️ Not configured'}
+            </div>
+            
+            <div class="status ${HUDU_API_KEY ? 'success' : 'warning'}">
+                <strong>Hudu API:</strong> ${HUDU_API_KEY ? '✅ Configured' : '⚠️ Not configured'}
+            </div>
+            
+            <div class="status ${HUDU_BASE_URL ? 'success' : 'warning'}">
+                <strong>Hudu URL:</strong> ${HUDU_BASE_URL || 'Not configured'}
+            </div>
+            
+            <h2>Test Webhook</h2>
+            <button onclick="testWebhook()">Send Test Webhook</button>
+            
+            <div id="result"></div>
+            
+            <script>
+                async function testWebhook() {
+                    const testData = {
+                        ticket: {
+                            id: "TEST-001",
+                            subject: "Test Ticket",
+                            customer: {
+                                email: "test@example.com",
+                                name: "Test User"
+                            }
+                        }
+                    };
+                    
+                    try {
+                        const response = await fetch('/bolddesk-webhook', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(testData)
+                        });
+                        
+                        const result = await response.json();
+                        document.getElementById('result').innerHTML = 
+                            '<h3>Response:</h3><pre>' + JSON.stringify(result, null, 2) + '</pre>';
+                    } catch (error) {
+                        document.getElementById('result').innerHTML = 
+                            '<div class="status error">Error: ' + error.message + '</div>';
+                    }
+                }
+            </script>
+        </div>
+    </body>
+    </html>
+    `;
+    res.send(html);
+});
+
+// Test endpoint with specific email
 app.get('/test/:email', (req, res) => {
     const email = req.params.email;
     res.json({
@@ -136,6 +237,7 @@ app.get('/test/:email', (req, res) => {
 if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
     app.listen(PORT, () => {
         console.log(`🚀 Server running on port ${PORT}`);
+        console.log(`📝 Test interface: http://localhost:${PORT}/test`);
     });
 }
 
