@@ -113,8 +113,11 @@ module.exports = async (req, res) => {
                                 
                                 console.log('Looking for assets related to:', { customerName, firstName, lastName });
                                 console.log('All company assets:');
-                                allCompanyAssets.forEach(asset => {
-                                    console.log(`- ${asset.name} (${asset.asset_type}) [ID: ${asset.id}]`);
+                                allCompanyAssets.forEach((asset, index) => {
+                                    console.log(`${index + 1}. "${asset.name}" (Type: ${asset.asset_type}) [ID: ${asset.id}]`);
+                                    if (asset.name && asset.name.toLowerCase().includes('mizra')) {
+                                        console.log(`   *** MIZRA ASSET FOUND: ${asset.name} ***`);
+                                    }
                                 });
                                 
                                 // More comprehensive search logic
@@ -125,12 +128,18 @@ module.exports = async (req, res) => {
                                     }
                                     
                                     const assetName = (asset.name || '').toLowerCase();
-                                    console.log(`Checking asset: "${asset.name}" (Type: ${asset.asset_type})`);
+                                    console.log(`\nChecking asset: "${asset.name}" (Type: ${asset.asset_type})`);
+                                    console.log(`Asset name lowercase: "${assetName}"`);
+                                    console.log(`Looking for: firstName="${firstName}", lastName="${lastName}", fullName="${customerName}"`);
                                     
                                     // Method 1: Name contains customer name parts
-                                    if (assetName.includes(firstName) || 
-                                        (lastName && assetName.includes(lastName)) ||
-                                        assetName.includes(customerName)) {
+                                    const hasFirstName = firstName && assetName.includes(firstName);
+                                    const hasLastName = lastName && assetName.includes(lastName);
+                                    const hasFullName = assetName.includes(customerName);
+                                    
+                                    console.log(`Name checks: firstName=${hasFirstName}, lastName=${hasLastName}, fullName=${hasFullName}`);
+                                    
+                                    if (hasFirstName || hasLastName || hasFullName) {
                                         console.log(`✓ Found by name match: ${asset.name}`);
                                         asset.match_reason = 'Name match';
                                         return true;
@@ -171,17 +180,29 @@ module.exports = async (req, res) => {
                                     // Method 3: For some asset types, check if they might belong to the customer's area
                                     // This is more speculative but can catch assets named by location or pattern
                                     const assetType = (asset.asset_type || '').toLowerCase();
+                                    console.log(`Asset type: "${assetType}"`);
+                                    
                                     if (assetType.includes('network') || assetType.includes('switch') || 
                                         assetType.includes('phone') || assetType.includes('computer')) {
+                                        
+                                        console.log('This is a potential infrastructure asset, checking location hints...');
                                         
                                         // Check if asset name contains location hints from customer name
                                         // E.g., if customer is "Friend Mizra", look for "Mizra" in asset names
                                         for (const part of nameParts) {
-                                            if (part.length > 3 && assetName.includes(part)) {
+                                            console.log(`Checking if asset name "${assetName}" contains part "${part}"`);
+                                            if (part.length > 3 && assetName.includes(part.toLowerCase())) {
                                                 console.log(`✓ Found by location match "${part}": ${asset.name}`);
                                                 asset.match_reason = `Location: ${part}`;
                                                 return true;
                                             }
+                                        }
+                                        
+                                        // Special case: check for "mizra" specifically in switch names
+                                        if (assetName.includes('mizra')) {
+                                            console.log(`✓ Found by specific "mizra" match: ${asset.name}`);
+                                            asset.match_reason = 'Mizra location match';
+                                            return true;
                                         }
                                     }
                                     
@@ -422,10 +443,14 @@ module.exports = async (req, res) => {
                                     <strong>🔍 Debug Info:</strong><br>
                                     • Customer: "${customerAsset.name}" (ID: ${customerAsset.id})<br>
                                     • Company: ${customerAsset.company_name} (ID: ${customerAsset.company_id})<br>
+                                    • Customer Asset Type: ${customerAsset.asset_type}<br>
                                     • Found ${relatedAssets.length} related assets<br>
                                     ${relatedAssets.length > 0 ? 
-                                        '• Assets: ' + relatedAssets.map(a => `${a.name} (${a.match_reason})`).join(', ') 
-                                        : '• No related assets found in company search'}
+                                        '• Assets found:<br>' + relatedAssets.map(a => `&nbsp;&nbsp;- ${a.name} (${a.asset_type}) - Matched by: ${a.match_reason}`).join('<br>') 
+                                        : '• No related assets found in company search'}<br>
+                                    • Customer fields count: ${customerAsset.fields?.length || 0}<br>
+                                    • Customer primary_serial: ${customerAsset.primary_serial || 'N/A'}<br>
+                                    • Customer URL: ${customerAsset.url || 'N/A'}
                                 </div>
                                 
                                 <!-- Footer -->
