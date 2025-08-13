@@ -47,7 +47,22 @@ module.exports = async (req, res) => {
                     
                     console.log('Found customer:', customerAsset.name, 'ID:', customerAsset.id);
                     
-                    // 2. Try to get related assets using proper Relations API
+                    // 2. Get full customer asset details 
+                    let detailedCustomerAsset = customerAsset;
+                    try {
+                        const customerDetailResponse = await axios.get(`${HUDU_BASE_URL}/api/v1/assets/${customerAsset.id}`, {
+                            headers: { 'x-api-key': HUDU_API_KEY, 'Content-Type': 'application/json' }
+                        });
+                        
+                        if (customerDetailResponse.data?.asset) {
+                            detailedCustomerAsset = customerDetailResponse.data.asset;
+                            console.log('Got detailed customer asset');
+                        }
+                    } catch (detailError) {
+                        console.log('Could not get detailed customer asset, using basic info');
+                    }
+                    
+                    // 3. Try to get related assets using proper Relations API
                     let relatedAssets = [];
                     
                     try {
@@ -128,7 +143,7 @@ module.exports = async (req, res) => {
                         console.error('Relations API completely failed:', relationsError.message);
                     }
                     
-                    // 3. If Relations API didn't find anything, fall back to smart matching
+                    // 4. If Relations API didn't find anything, fall back to smart matching
                     if (relatedAssets.length === 0) {
                         console.log('Relations API found no assets, falling back to smart matching...');
                         
