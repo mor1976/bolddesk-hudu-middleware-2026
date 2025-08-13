@@ -2,23 +2,9 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 10
-    },
-    "api/*.js": {
-      "maxDuration": 10
     }
   },
   "rewrites": [
-    {
-      "source": "/",
-      "destination": "/api/index"
-    },
-    {
-      "source": "/health",
-      "destination": "/api/index"
-    },
-    {
-      "source": "/bolddesk-webhook",
-      "destination": "/api/index"
-    }
+    { "source": "/(.*)", "destination": "/api" }
   ]
 }
