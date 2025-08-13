@@ -1,4 +1,4 @@
-// api/index.js - Enhanced version with more Hudu details
+// api/index.js - Interactive version with expandable assets
 const axios = require('axios');
 
 // Environment variables
@@ -45,184 +45,284 @@ module.exports = async (req, res) => {
                     );
                     
                     if (assetsResponse.data?.assets?.length > 0) {
-                        const asset = assetsResponse.data.assets[0];
-                        console.log('Found in Hudu:', asset.name);
+                        const customerAsset = assetsResponse.data.assets[0];
+                        console.log('Found customer:', customerAsset.name);
                         
-                        // 2. Get company details
-                        let companyInfo = null;
-                        if (asset.company_id) {
+                        // 2. Get all assets for this company
+                        let companyAssets = [];
+                        if (customerAsset.company_id) {
                             try {
-                                const companyResponse = await axios.get(
-                                    `${HUDU_BASE_URL}/api/v1/companies/${asset.company_id}`,
-                                    {
-                                        headers: {
-                                            'x-api-key': HUDU_API_KEY,
-                                            'Content-Type': 'application/json'
-                                        }
-                                    }
-                                );
-                                companyInfo = companyResponse.data.company;
-                            } catch (e) {
-                                console.log('Could not fetch company details');
-                            }
-                        }
-                        
-                        // 3. Get related assets (computers, passwords, etc.)
-                        let relatedAssets = [];
-                        if (asset.company_id) {
-                            try {
-                                const relatedResponse = await axios.get(
-                                    `${HUDU_BASE_URL}/api/v1/companies/${asset.company_id}/assets`,
+                                const companyAssetsResponse = await axios.get(
+                                    `${HUDU_BASE_URL}/api/v1/companies/${customerAsset.company_id}/assets`,
                                     {
                                         headers: {
                                             'x-api-key': HUDU_API_KEY,
                                             'Content-Type': 'application/json'
                                         },
                                         params: { 
-                                            page_size: 10,
-                                            asset_layout_id: null // Get all types
+                                            page_size: 50
                                         }
                                     }
                                 );
-                                relatedAssets = relatedResponse.data.assets || [];
+                                companyAssets = companyAssetsResponse.data.assets || [];
+                                console.log(`Found ${companyAssets.length} company assets`);
                             } catch (e) {
-                                console.log('Could not fetch related assets');
+                                console.log('Could not fetch company assets:', e.message);
                             }
                         }
                         
-                        // Extract asset fields if they exist
-                        const fields = asset.fields || [];
-                        const getFieldValue = (fieldName) => {
-                            const field = fields.find(f => 
-                                f.label?.toLowerCase().includes(fieldName.toLowerCase())
-                            );
-                            return field?.value || '-';
-                        };
+                        // Group assets by type
+                        const groupedAssets = {};
+                        companyAssets.forEach(asset => {
+                            const type = asset.asset_type || 'Other';
+                            if (!groupedAssets[type]) {
+                                groupedAssets[type] = [];
+                            }
+                            groupedAssets[type].push(asset);
+                        });
                         
-                        // Count asset types
-                        const assetCounts = {
-                            computers: relatedAssets.filter(a => a.asset_type?.toLowerCase().includes('computer')).length,
-                            passwords: relatedAssets.filter(a => a.asset_type?.toLowerCase().includes('password')).length,
-                            websites: relatedAssets.filter(a => a.asset_type?.toLowerCase().includes('website')).length,
-                            total: relatedAssets.length
-                        };
-                        
-                        // Create enhanced HTML message
+                        // Create enhanced HTML with JavaScript for interactivity
                         htmlMessage = `
                             <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 13px;'>
+                                <style>
+                                    .asset-item {
+                                        background: #f6f8fa;
+                                        border: 1px solid #e1e4e8;
+                                        border-radius: 6px;
+                                        margin: 8px 0;
+                                        transition: all 0.2s;
+                                    }
+                                    .asset-item:hover {
+                                        border-color: #667eea;
+                                        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
+                                    }
+                                    .asset-header {
+                                        padding: 10px 12px;
+                                        cursor: pointer;
+                                        display: flex;
+                                        justify-content: space-between;
+                                        align-items: center;
+                                        user-select: none;
+                                    }
+                                    .asset-title {
+                                        font-weight: 500;
+                                        color: #24292e;
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 8px;
+                                    }
+                                    .asset-toggle {
+                                        color: #586069;
+                                        font-size: 12px;
+                                        transition: transform 0.2s;
+                                    }
+                                    .asset-details {
+                                        display: none;
+                                        padding: 0 12px 12px 12px;
+                                        border-top: 1px solid #e1e4e8;
+                                    }
+                                    .asset-details.show {
+                                        display: block;
+                                    }
+                                    .field-row {
+                                        display: flex;
+                                        padding: 6px 0;
+                                        font-size: 12px;
+                                    }
+                                    .field-label {
+                                        color: #586069;
+                                        min-width: 100px;
+                                    }
+                                    .field-value {
+                                        color: #24292e;
+                                        flex: 1;
+                                    }
+                                    .asset-type-section {
+                                        margin: 15px 0;
+                                    }
+                                    .section-title {
+                                        font-weight: 600;
+                                        color: #24292e;
+                                        margin-bottom: 8px;
+                                        padding: 8px;
+                                        background: #f0f6fc;
+                                        border-radius: 6px;
+                                        display: flex;
+                                        justify-content: space-between;
+                                        align-items: center;
+                                    }
+                                    .asset-count {
+                                        background: #0969da;
+                                        color: white;
+                                        padding: 2px 8px;
+                                        border-radius: 12px;
+                                        font-size: 11px;
+                                    }
+                                    .expand-all {
+                                        background: #667eea;
+                                        color: white;
+                                        border: none;
+                                        padding: 6px 12px;
+                                        border-radius: 4px;
+                                        font-size: 11px;
+                                        cursor: pointer;
+                                        margin-left: 8px;
+                                    }
+                                    .expand-all:hover {
+                                        background: #5a67d8;
+                                    }
+                                </style>
+                                
                                 <!-- Header -->
                                 <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 15px; border-radius: 8px 8px 0 0; margin: -10px -10px 0 -10px;'>
                                     <div style='display: flex; justify-content: space-between; align-items: center;'>
-                                        <div style='font-weight: 600; font-size: 14px;'>✅ Customer Found in Hudu</div>
+                                        <div style='font-weight: 600; font-size: 14px;'>✅ ${customerAsset.name}</div>
                                         <div style='background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 12px; font-size: 11px;'>
-                                            ID: #${asset.id}
+                                            ${customerAsset.company_name}
                                         </div>
                                     </div>
                                 </div>
                                 
-                                <!-- Customer Info Section -->
-                                <div style='background: white; padding: 15px; border-left: 1px solid #e1e4e8; border-right: 1px solid #e1e4e8;'>
-                                    <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 10px;'>
+                                <!-- Quick Info -->
+                                <div style='background: white; padding: 12px; border-left: 1px solid #e1e4e8; border-right: 1px solid #e1e4e8;'>
+                                    <div style='display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; text-align: center;'>
                                         <div>
-                                            <div style='color: #586069; font-size: 11px; margin-bottom: 2px;'>שם לקוח</div>
-                                            <div style='color: #24292e; font-weight: 500;'>${asset.name}</div>
+                                            <div style='font-size: 20px; font-weight: 600; color: #0969da;'>${companyAssets.length}</div>
+                                            <div style='font-size: 11px; color: #586069;'>סה"כ נכסים</div>
                                         </div>
                                         <div>
-                                            <div style='color: #586069; font-size: 11px; margin-bottom: 2px;'>חברה</div>
-                                            <div style='color: #24292e; font-weight: 500;'>${asset.company_name}</div>
+                                            <div style='font-size: 20px; font-weight: 600; color: #28a745;'>${Object.keys(groupedAssets).length}</div>
+                                            <div style='font-size: 11px; color: #586069;'>סוגי נכסים</div>
                                         </div>
                                         <div>
-                                            <div style='color: #586069; font-size: 11px; margin-bottom: 2px;'>אימייל</div>
-                                            <div style='color: #0969da;'>${email}</div>
-                                        </div>
-                                        <div>
-                                            <div style='color: #586069; font-size: 11px; margin-bottom: 2px;'>טלפון</div>
-                                            <div style='color: #24292e;'>${getFieldValue('phone') || getFieldValue('טלפון')}</div>
+                                            <div style='font-size: 20px; font-weight: 600; color: #764ba2;'>#${customerAsset.id}</div>
+                                            <div style='font-size: 11px; color: #586069;'>Asset ID</div>
                                         </div>
                                     </div>
                                 </div>
                                 
-                                <!-- Company Details -->
-                                ${companyInfo ? `
-                                <div style='background: #f6f8fa; padding: 12px 15px; border-left: 1px solid #e1e4e8; border-right: 1px solid #e1e4e8;'>
-                                    <div style='font-weight: 600; color: #24292e; margin-bottom: 8px; font-size: 12px;'>
-                                        🏢 פרטי חברה
+                                <!-- Assets List -->
+                                <div style='background: white; padding: 15px; border: 1px solid #e1e4e8;'>
+                                    <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;'>
+                                        <h4 style='margin: 0; color: #24292e;'>🗂️ נכסי החברה</h4>
+                                        <button class='expand-all' onclick='toggleAll()'>הצג/הסתר הכל</button>
                                     </div>
-                                    <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 8px;'>
-                                        ${companyInfo.address ? `
-                                        <div>
-                                            <span style='color: #586069; font-size: 11px;'>כתובת:</span>
-                                            <span style='color: #24292e; font-size: 12px;'>${companyInfo.address}</span>
+                                    
+                                    ${Object.entries(groupedAssets).map(([type, assets]) => {
+                                        // Get icon based on asset type
+                                        let icon = '📄';
+                                        if (type.toLowerCase().includes('computer')) icon = '💻';
+                                        else if (type.toLowerCase().includes('license')) icon = '🔑';
+                                        else if (type.toLowerCase().includes('phone')) icon = '📱';
+                                        else if (type.toLowerCase().includes('password')) icon = '🔐';
+                                        else if (type.toLowerCase().includes('website')) icon = '🌐';
+                                        else if (type.toLowerCase().includes('network')) icon = '🔌';
+                                        else if (type.toLowerCase().includes('printer')) icon = '🖨️';
+                                        else if (type.toLowerCase().includes('people')) icon = '👤';
+                                        
+                                        return `
+                                        <div class='asset-type-section'>
+                                            <div class='section-title'>
+                                                <span>${icon} ${type}</span>
+                                                <span class='asset-count'>${assets.length}</span>
+                                            </div>
+                                            ${assets.map((asset, index) => `
+                                                <div class='asset-item'>
+                                                    <div class='asset-header' onclick='toggleAsset(this)'>
+                                                        <div class='asset-title'>
+                                                            <span>${asset.name || 'Unnamed Asset'}</span>
+                                                        </div>
+                                                        <span class='asset-toggle'>▼</span>
+                                                    </div>
+                                                    <div class='asset-details' id='asset-${asset.id}'>
+                                                        ${asset.primary_serial ? `
+                                                        <div class='field-row'>
+                                                            <span class='field-label'>Serial:</span>
+                                                            <span class='field-value'>${asset.primary_serial}</span>
+                                                        </div>
+                                                        ` : ''}
+                                                        ${asset.primary_model ? `
+                                                        <div class='field-row'>
+                                                            <span class='field-label'>Model:</span>
+                                                            <span class='field-value'>${asset.primary_model}</span>
+                                                        </div>
+                                                        ` : ''}
+                                                        ${asset.primary_manufacturer ? `
+                                                        <div class='field-row'>
+                                                            <span class='field-label'>Manufacturer:</span>
+                                                            <span class='field-value'>${asset.primary_manufacturer}</span>
+                                                        </div>
+                                                        ` : ''}
+                                                        ${asset.fields && asset.fields.length > 0 ? 
+                                                            asset.fields.slice(0, 5).map(field => {
+                                                                if (field.value && field.label) {
+                                                                    return `
+                                                                    <div class='field-row'>
+                                                                        <span class='field-label'>${field.label}:</span>
+                                                                        <span class='field-value'>${field.value}</span>
+                                                                    </div>
+                                                                    `;
+                                                                }
+                                                                return '';
+                                                            }).join('')
+                                                        : ''}
+                                                        <div class='field-row'>
+                                                            <span class='field-label'>Updated:</span>
+                                                            <span class='field-value'>${new Date(asset.updated_at).toLocaleDateString('he-IL')}</span>
+                                                        </div>
+                                                        <div style='margin-top: 10px; text-align: right;'>
+                                                            <a href='${asset.url}' target='_blank' style='color: #0969da; text-decoration: none; font-size: 12px;'>
+                                                                🔗 View in Hudu →
+                                                            </a>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            `).join('')}
                                         </div>
-                                        ` : ''}
-                                        ${companyInfo.phone_number ? `
-                                        <div>
-                                            <span style='color: #586069; font-size: 11px;'>טלפון:</span>
-                                            <span style='color: #24292e; font-size: 12px;'>${companyInfo.phone_number}</span>
-                                        </div>
-                                        ` : ''}
-                                        ${companyInfo.website ? `
-                                        <div>
-                                            <span style='color: #586069; font-size: 11px;'>אתר:</span>
-                                            <a href='${companyInfo.website}' target='_blank' style='color: #0969da; font-size: 12px; text-decoration: none;'>
-                                                ${companyInfo.website.replace('https://', '').replace('http://', '')}
-                                            </a>
-                                        </div>
-                                        ` : ''}
-                                    </div>
+                                        `;
+                                    }).join('')}
                                 </div>
-                                ` : ''}
                                 
-                                <!-- Assets Summary -->
-                                <div style='background: white; padding: 12px 15px; border-left: 1px solid #e1e4e8; border-right: 1px solid #e1e4e8;'>
-                                    <div style='font-weight: 600; color: #24292e; margin-bottom: 10px; font-size: 12px;'>
-                                        📊 סיכום נכסים בחברה
-                                    </div>
-                                    <div style='display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; text-align: center;'>
-                                        <div style='background: #f0f6fc; padding: 8px; border-radius: 6px;'>
-                                            <div style='font-size: 18px; font-weight: 600; color: #0969da;'>${assetCounts.total}</div>
-                                            <div style='font-size: 10px; color: #586069;'>סה"כ נכסים</div>
-                                        </div>
-                                        <div style='background: #f0fdf4; padding: 8px; border-radius: 6px;'>
-                                            <div style='font-size: 18px; font-weight: 600; color: #16a34a;'>${assetCounts.computers}</div>
-                                            <div style='font-size: 10px; color: #586069;'>מחשבים</div>
-                                        </div>
-                                        <div style='background: #fef3c7; padding: 8px; border-radius: 6px;'>
-                                            <div style='font-size: 18px; font-weight: 600; color: #d97706;'>${assetCounts.passwords}</div>
-                                            <div style='font-size: 10px; color: #586069;'>סיסמאות</div>
-                                        </div>
-                                        <div style='background: #fce7f3; padding: 8px; border-radius: 6px;'>
-                                            <div style='font-size: 18px; font-weight: 600; color: #be185d;'>${assetCounts.websites}</div>
-                                            <div style='font-size: 10px; color: #586069;'>אתרים</div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Additional Fields -->
-                                <div style='background: #f6f8fa; padding: 12px 15px; border-left: 1px solid #e1e4e8; border-right: 1px solid #e1e4e8;'>
-                                    <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 8px;'>
-                                        <div>
-                                            <span style='color: #586069; font-size: 11px;'>סוג נכס:</span>
-                                            <span style='color: #24292e; font-size: 12px; font-weight: 500;'>${asset.asset_type || 'People'}</span>
-                                        </div>
-                                        <div>
-                                            <span style='color: #586069; font-size: 11px;'>עודכן לאחרונה:</span>
-                                            <span style='color: #24292e; font-size: 12px;'>${new Date(asset.updated_at).toLocaleDateString('he-IL')}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Action Buttons -->
-                                <div style='background: white; padding: 15px; border: 1px solid #e1e4e8; border-radius: 0 0 8px 8px; text-align: center;'>
-                                    <a href='${asset.url}' target='_blank' style='display: inline-block; padding: 8px 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 13px; margin: 0 5px;'>
-                                        🔍 View Full Details in Hudu
+                                <!-- Footer with actions -->
+                                <div style='background: #f6f8fa; padding: 12px; border: 1px solid #e1e4e8; border-radius: 0 0 8px 8px; text-align: center;'>
+                                    <a href='${customerAsset.url}' target='_blank' style='display: inline-block; padding: 8px 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 12px; margin: 0 4px;'>
+                                        👤 View Customer
                                     </a>
-                                    ${companyInfo ? `
-                                    <a href='${HUDU_BASE_URL}/companies/${asset.company_id}' target='_blank' style='display: inline-block; padding: 8px 20px; background: #28a745; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 13px; margin: 0 5px;'>
+                                    <a href='${HUDU_BASE_URL}/companies/${customerAsset.company_id}' target='_blank' style='display: inline-block; padding: 8px 16px; background: #28a745; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 12px; margin: 0 4px;'>
                                         🏢 View Company
                                     </a>
-                                    ` : ''}
                                 </div>
+                                
+                                <script>
+                                    function toggleAsset(header) {
+                                        const details = header.nextElementSibling;
+                                        const toggle = header.querySelector('.asset-toggle');
+                                        
+                                        if (details.classList.contains('show')) {
+                                            details.classList.remove('show');
+                                            toggle.style.transform = 'rotate(0deg)';
+                                        } else {
+                                            details.classList.add('show');
+                                            toggle.style.transform = 'rotate(180deg)';
+                                        }
+                                    }
+                                    
+                                    function toggleAll() {
+                                        const allDetails = document.querySelectorAll('.asset-details');
+                                        const allToggles = document.querySelectorAll('.asset-toggle');
+                                        const anyOpen = Array.from(allDetails).some(d => d.classList.contains('show'));
+                                        
+                                        allDetails.forEach((details, i) => {
+                                            if (anyOpen) {
+                                                details.classList.remove('show');
+                                                allToggles[i].style.transform = 'rotate(0deg)';
+                                            } else {
+                                                details.classList.add('show');
+                                                allToggles[i].style.transform = 'rotate(180deg)';
+                                            }
+                                        });
+                                    }
+                                </script>
                             </div>
                         `;
                     } else {
@@ -232,9 +332,6 @@ module.exports = async (req, res) => {
                                 <h4 style='color: #ff9800; margin: 0 0 10px 0;'>⚠️ Customer Not Found</h4>
                                 <p style='color: #666;'>Email: ${email}</p>
                                 <p style='color: #666; font-size: 12px;'>This customer needs to be added to Hudu.</p>
-                                <a href='${HUDU_BASE_URL}/companies' target='_blank' style='display: inline-block; margin-top: 10px; padding: 8px 15px; background: #ff9800; color: white; text-decoration: none; border-radius: 5px;'>
-                                    Add to Hudu →
-                                </a>
                             </div>
                         `;
                     }
@@ -247,18 +344,11 @@ module.exports = async (req, res) => {
                         </div>
                     `;
                 }
-            } else if (!email) {
-                htmlMessage = `
-                    <div style='border: 1px solid #6c757d; border-radius: 8px; padding: 15px; background: #f8f9fa;'>
-                        <h4 style='color: #6c757d; margin: 0 0 10px 0;'>ℹ️ No Email Found</h4>
-                        <p style='color: #666; font-size: 12px;'>Could not extract email from ticket data.</p>
-                    </div>
-                `;
             } else {
                 htmlMessage = `
                     <div style='border: 1px solid #6c757d; border-radius: 8px; padding: 15px; background: #f8f9fa;'>
-                        <h4 style='color: #6c757d; margin: 0 0 10px 0;'>ℹ️ Hudu Not Configured</h4>
-                        <p style='color: #666; font-size: 12px;'>Please configure Hudu API credentials.</p>
+                        <h4 style='color: #6c757d; margin: 0 0 10px 0;'>ℹ️ Configuration Issue</h4>
+                        <p style='color: #666; font-size: 12px;'>Email or Hudu credentials not found.</p>
                     </div>
                 `;
             }
@@ -269,7 +359,7 @@ module.exports = async (req, res) => {
                 "statusCode": "200"
             };
             
-            console.log('Sending enhanced response to BoldDesk');
+            console.log('Sending interactive response to BoldDesk');
             res.status(200).json(response);
             
         } catch (error) {
@@ -283,10 +373,10 @@ module.exports = async (req, res) => {
             res.status(200).json(errorResponse);
         }
     } 
-    // Handle GET requests (for testing)
+    // Handle GET requests
     else if (req.method === 'GET') {
         const testResponse = {
-            "message": "<div style='padding: 15px; background: #28a745; color: white; border-radius: 8px; text-align: center;'><h3>✅ BoldDesk-Hudu Integration Active</h3><p>Enhanced version with detailed customer information.</p></div>",
+            "message": "<div style='padding: 15px; background: #28a745; color: white; border-radius: 8px; text-align: center;'><h3>✅ BoldDesk-Hudu Integration Active</h3><p>Interactive version with expandable assets.</p></div>",
             "statusCode": "200"
         };
         
