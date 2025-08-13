@@ -1,4 +1,4 @@
-// api/index.js - Show only customer-specific assets
+// api/index.js - Show customer with their related items from Hudu
 const axios = require('axios');
 
 // Environment variables
@@ -32,8 +32,8 @@ module.exports = async (req, res) => {
             // If we have an email and Hudu credentials
             if (email && HUDU_API_KEY && HUDU_BASE_URL) {
                 try {
-                    // Search for ALL assets related to this email/customer
-                    const assetsResponse = await axios.get(
+                    // 1. Search for the customer (People asset)
+                    const searchResponse = await axios.get(
                         `${HUDU_BASE_URL}/api/v1/assets`,
                         {
                             headers: {
@@ -42,20 +42,19 @@ module.exports = async (req, res) => {
                             },
                             params: { 
                                 search: email,
-                                page_size: 100
+                                page_size: 25
                             }
                         }
                     );
                     
-                    // Filter to get only customer-related assets
-                    const allAssets = assetsResponse.data?.assets || [];
-                    
-                    // Find the main customer asset (type: People)
+                    // Find the People/Contact asset
+                    const allAssets = searchResponse.data?.assets || [];
                     const customerAsset = allAssets.find(asset => 
                         asset.asset_type?.toLowerCase().includes('people') ||
                         asset.asset_type?.toLowerCase().includes('person') ||
-                        asset.asset_type?.toLowerCase().includes('contact')
-                    ) || allAssets[0];
+                        asset.asset_type?.toLowerCase().includes('contact') ||
+                        asset.name?.includes(email.split('@')[0])
+                    );
                     
                     if (!customerAsset) {
                         htmlMessage = `
@@ -65,37 +64,109 @@ module.exports = async (req, res) => {
                             </div>
                         `;
                     } else {
-                        console.log('Found customer:', customerAsset.name);
+                        console.log('Found customer:', customerAsset.name, 'ID:', customerAsset.id);
                         
-                        // Search for assets that contain the customer's name or email
-                        let customerRelatedAssets = [];
+                        // 2. Get the specific asset details with relations
+                        let fullAssetDetails = null;
+                        let relatedItems = [];
                         
-                        // Try to get assets that mention this customer
                         try {
-                            // Search by customer name
-                            const nameSearchResponse = await axios.get(
-                                `${HUDU_BASE_URL}/api/v1/assets`,
+                            // Get full asset details including relations
+                            const assetDetailResponse = await axios.get(
+                                `${HUDU_BASE_URL}/api/v1/assets/${customerAsset.id}`,
                                 {
                                     headers: {
                                         'x-api-key': HUDU_API_KEY,
                                         'Content-Type': 'application/json'
-                                    },
-                                    params: { 
-                                        search: customerAsset.name,
-                                        page_size: 50
                                     }
                                 }
                             );
-                            customerRelatedAssets = nameSearchResponse.data?.assets || [];
+                            fullAssetDetails = assetDetailResponse.data?.asset;
+                            console.log('Got full asset details');
                             
-                            // Filter out the customer asset itself and keep only related items
-                            customerRelatedAssets = customerRelatedAssets.filter(asset => 
-                                asset.id !== customerAsset.id
-                            );
+                            // Get related items through relations endpoint if available
+                            try {
+                                const relationsResponse = await axios.get(
+                                    `${HUDU_BASE_URL}/api/v1/relations`,
+                                    {
+                                        headers: {
+                                            'x-api-key': HUDU_API_KEY,
+                                            'Content-Type': 'application/json'
+                                        },
+                                        params: {
+                                            fromable_type: 'Asset',
+                                            fromable_id: customerAsset.id
+                                        }
+                                    }
+                                );
+                                
+                                const relations = relationsResponse.data?.relations || [];
+                                console.log(`Found ${relations.length} relations`);
+                                
+                                // Get details for each related asset
+                                for (const relation of relations) {
+                                    if (relation.toable_type === 'Asset' && relation.toable_id) {
+                                        try {
+                                            const relatedAssetResponse = await axios.get(
+                                                `${HUDU_BASE_URL}/api/v1/assets/${relation.toable_id}`,
+                                                {
+                                                    headers: {
+                                                        'x-api-key': HUDU_API_KEY,
+                                                        'Content-Type': 'application/json'
+                                                    }
+                                                }
+                                            );
+                                            if (relatedAssetResponse.data?.asset) {
+                                                relatedItems.push(relatedAssetResponse.data.asset);
+                                            }
+                                        } catch (e) {
+                                            console.log(`Could not fetch related asset ${relation.toable_id}`);
+                                        }
+                                    }
+                                }
+                            } catch (e) {
+                                console.log('Could not fetch relations:', e.message);
+                            }
                             
-                            console.log(`Found ${customerRelatedAssets.length} related assets`);
+                            // Alternative: Search for Phone assets with matching customer name
+                            if (relatedItems.length === 0) {
+                                const phoneSearchResponse = await axios.get(
+                                    `${HUDU_BASE_URL}/api/v1/companies/${customerAsset.company_id}/assets`,
+                                    {
+                                        headers: {
+                                            'x-api-key': HUDU_API_KEY,
+                                            'Content-Type': 'application/json'
+                                        },
+                                        params: {
+                                            asset_layout_id: null,
+                                            page_size: 100
+                                        }
+                                    }
+                                );
+                                
+                                const companyAssets = phoneSearchResponse.data?.assets || [];
+                                
+                                // Find assets that might be related to this customer
+                                relatedItems = companyAssets.filter(asset => {
+                                    // Check if asset name contains customer name
+                                    if (asset.name?.toLowerCase().includes(customerAsset.name.toLowerCase())) {
+                                        return true;
+                                    }
+                                    // Check if any field contains customer name or ID
+                                    if (asset.fields) {
+                                        return asset.fields.some(field => 
+                                            field.value?.toString().toLowerCase().includes(customerAsset.name.toLowerCase()) ||
+                                            field.value?.toString().includes(customerAsset.id.toString())
+                                        );
+                                    }
+                                    return false;
+                                });
+                                
+                                console.log(`Found ${relatedItems.length} potentially related items`);
+                            }
+                            
                         } catch (e) {
-                            console.log('Could not fetch related assets:', e.message);
+                            console.log('Could not fetch asset details:', e.message);
                         }
                         
                         // Extract customer fields
@@ -106,97 +177,102 @@ module.exports = async (req, res) => {
                             return field?.value || null;
                         };
                         
-                        // Get customer details
-                        const customerPhone = getFieldValue(customerAsset, 'phone') || 
-                                            getFieldValue(customerAsset, 'טלפון') ||
-                                            getFieldValue(customerAsset, 'cell') ||
-                                            getFieldValue(customerAsset, 'mobile');
-                        
-                        const customerAddress = getFieldValue(customerAsset, 'address') || 
-                                              getFieldValue(customerAsset, 'כתובת');
-                        
-                        const customerTitle = getFieldValue(customerAsset, 'title') || 
-                                            getFieldValue(customerAsset, 'תפקיד') ||
-                                            getFieldValue(customerAsset, 'position');
-                        
-                        // Group related assets by type
-                        const groupedAssets = {};
-                        customerRelatedAssets.forEach(asset => {
-                            const type = asset.asset_type || 'Other';
-                            if (!groupedAssets[type]) {
-                                groupedAssets[type] = [];
+                        // Group related items by type
+                        const groupedRelated = {};
+                        relatedItems.forEach(item => {
+                            const type = item.asset_type || 'Other';
+                            if (!groupedRelated[type]) {
+                                groupedRelated[type] = [];
                             }
-                            groupedAssets[type].push(asset);
+                            groupedRelated[type].push(item);
                         });
                         
                         // Create HTML
                         htmlMessage = `
                             <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 13px;'>
                                 <style>
-                                    .info-grid {
+                                    .detail-section {
+                                        margin: 15px 0;
+                                        padding: 12px;
+                                        background: #f6f8fa;
+                                        border-radius: 6px;
+                                    }
+                                    .field-grid {
                                         display: grid;
                                         grid-template-columns: 1fr 1fr;
-                                        gap: 8px;
+                                        gap: 10px;
                                         margin: 10px 0;
                                     }
-                                    .info-item {
+                                    .field-item {
                                         padding: 8px;
-                                        background: #f6f8fa;
+                                        background: white;
                                         border-radius: 4px;
+                                        border: 1px solid #e1e4e8;
                                     }
-                                    .info-label {
+                                    .field-label {
                                         color: #586069;
                                         font-size: 11px;
                                         margin-bottom: 2px;
                                     }
-                                    .info-value {
+                                    .field-value {
                                         color: #24292e;
                                         font-weight: 500;
                                         font-size: 13px;
                                     }
-                                    .asset-item {
-                                        background: #f6f8fa;
+                                    .related-item {
+                                        background: white;
                                         border: 1px solid #e1e4e8;
                                         border-radius: 6px;
                                         margin: 8px 0;
-                                        padding: 10px;
-                                        transition: all 0.2s;
+                                        overflow: hidden;
                                     }
-                                    .asset-item:hover {
-                                        border-color: #667eea;
-                                        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
-                                    }
-                                    .asset-header {
+                                    .related-header {
+                                        background: #f6f8fa;
+                                        padding: 10px 12px;
+                                        border-bottom: 1px solid #e1e4e8;
+                                        cursor: pointer;
                                         display: flex;
                                         justify-content: space-between;
                                         align-items: center;
-                                        cursor: pointer;
                                     }
-                                    .asset-title {
+                                    .related-header:hover {
+                                        background: #f0f2f5;
+                                    }
+                                    .related-title {
                                         font-weight: 500;
                                         color: #24292e;
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 8px;
                                     }
-                                    .asset-details {
+                                    .related-type {
+                                        background: #e3f2fd;
+                                        color: #0969da;
+                                        padding: 2px 6px;
+                                        border-radius: 3px;
+                                        font-size: 10px;
+                                        font-weight: 600;
+                                    }
+                                    .related-details {
                                         display: none;
-                                        margin-top: 10px;
-                                        padding-top: 10px;
-                                        border-top: 1px solid #e1e4e8;
+                                        padding: 12px;
                                     }
-                                    .asset-details.show {
+                                    .related-details.show {
                                         display: block;
                                     }
-                                    .field-row {
+                                    .detail-row {
                                         display: flex;
-                                        padding: 4px 0;
+                                        padding: 5px 0;
                                         font-size: 12px;
                                     }
-                                    .field-label {
+                                    .detail-label {
                                         color: #586069;
                                         min-width: 100px;
                                     }
-                                    .field-value {
+                                    .detail-value {
                                         color: #24292e;
                                         flex: 1;
+                                        word-break: break-word;
                                     }
                                 </style>
                                 
@@ -213,98 +289,77 @@ module.exports = async (req, res) => {
                                 </div>
                                 
                                 <!-- Customer Details -->
-                                <div style='background: white; padding: 15px; border-left: 1px solid #e1e4e8; border-right: 1px solid #e1e4e8;'>
-                                    <h4 style='margin: 0 0 10px 0; color: #24292e; font-size: 13px;'>👤 פרטי לקוח</h4>
-                                    <div class='info-grid'>
-                                        <div class='info-item'>
-                                            <div class='info-label'>אימייל</div>
-                                            <div class='info-value'>${email}</div>
-                                        </div>
-                                        ${customerPhone ? `
-                                        <div class='info-item'>
-                                            <div class='info-label'>טלפון</div>
-                                            <div class='info-value'>${customerPhone}</div>
-                                        </div>
-                                        ` : ''}
-                                        ${customerTitle ? `
-                                        <div class='info-item'>
-                                            <div class='info-label'>תפקיד</div>
-                                            <div class='info-value'>${customerTitle}</div>
-                                        </div>
-                                        ` : ''}
-                                        ${customerAddress ? `
-                                        <div class='info-item'>
-                                            <div class='info-label'>כתובת</div>
-                                            <div class='info-value'>${customerAddress}</div>
-                                        </div>
-                                        ` : ''}
-                                        <div class='info-item'>
-                                            <div class='info-label'>Asset ID</div>
-                                            <div class='info-value'>#${customerAsset.id}</div>
-                                        </div>
-                                        <div class='info-item'>
-                                            <div class='info-label'>עודכן</div>
-                                            <div class='info-value'>${new Date(customerAsset.updated_at).toLocaleDateString('he-IL')}</div>
-                                        </div>
+                                <div class='detail-section'>
+                                    <h4 style='margin: 0 0 10px 0; color: #24292e; font-size: 14px;'>👤 פרטי לקוח</h4>
+                                    <div class='field-grid'>
+                                        ${customerAsset.fields?.filter(f => f.value).slice(0, 8).map(field => `
+                                            <div class='field-item'>
+                                                <div class='field-label'>${field.label}</div>
+                                                <div class='field-value'>${field.value}</div>
+                                            </div>
+                                        `).join('') || '<div>No fields available</div>'}
                                     </div>
-                                    
-                                    <!-- Show all customer fields -->
-                                    ${customerAsset.fields && customerAsset.fields.length > 0 ? `
-                                        <div style='margin-top: 15px; padding-top: 15px; border-top: 1px solid #e1e4e8;'>
-                                            <h4 style='margin: 0 0 10px 0; color: #24292e; font-size: 13px;'>📋 שדות נוספים</h4>
-                                            ${customerAsset.fields.filter(f => f.value).map(field => `
-                                                <div class='field-row'>
-                                                    <span class='field-label'>${field.label}:</span>
-                                                    <span class='field-value'>${field.value}</span>
-                                                </div>
-                                            `).join('')}
-                                        </div>
-                                    ` : ''}
                                 </div>
                                 
-                                <!-- Related Assets (if any) -->
-                                ${customerRelatedAssets.length > 0 ? `
-                                <div style='background: white; padding: 15px; border: 1px solid #e1e4e8;'>
-                                    <h4 style='margin: 0 0 10px 0; color: #24292e; font-size: 13px;'>
-                                        🔗 נכסים קשורים (${customerRelatedAssets.length})
+                                <!-- Related Items -->
+                                ${relatedItems.length > 0 ? `
+                                <div class='detail-section'>
+                                    <h4 style='margin: 0 0 10px 0; color: #24292e; font-size: 14px;'>
+                                        🔗 פריטים מקושרים (${relatedItems.length})
                                     </h4>
-                                    ${Object.entries(groupedAssets).map(([type, assets]) => {
+                                    ${Object.entries(groupedRelated).map(([type, items]) => {
                                         let icon = '📄';
-                                        if (type.toLowerCase().includes('computer')) icon = '💻';
+                                        if (type.toLowerCase().includes('phone')) icon = '📱';
+                                        else if (type.toLowerCase().includes('computer')) icon = '💻';
                                         else if (type.toLowerCase().includes('password')) icon = '🔐';
                                         else if (type.toLowerCase().includes('license')) icon = '🔑';
                                         
-                                        return `
-                                        <div style='margin: 10px 0;'>
-                                            <div style='font-weight: 500; color: #586069; font-size: 12px; margin-bottom: 5px;'>
-                                                ${icon} ${type} (${assets.length})
-                                            </div>
-                                            ${assets.map(asset => `
-                                                <div class='asset-item'>
-                                                    <div class='asset-header' onclick='toggleAsset(this)'>
-                                                        <span class='asset-title'>${asset.name}</span>
-                                                        <span style='color: #586069; font-size: 11px;'>▼</span>
+                                        return items.map(item => `
+                                            <div class='related-item'>
+                                                <div class='related-header' onclick='toggleRelated(this)'>
+                                                    <div class='related-title'>
+                                                        <span>${icon}</span>
+                                                        <span>${item.name}</span>
+                                                        <span class='related-type'>${type}</span>
                                                     </div>
-                                                    <div class='asset-details'>
-                                                        ${asset.primary_serial ? `
-                                                        <div class='field-row'>
-                                                            <span class='field-label'>Serial:</span>
-                                                            <span class='field-value'>${asset.primary_serial}</span>
+                                                    <span style='color: #586069; font-size: 12px;'>▼</span>
+                                                </div>
+                                                <div class='related-details'>
+                                                    ${item.fields?.filter(f => f.value).map(field => `
+                                                        <div class='detail-row'>
+                                                            <span class='detail-label'>${field.label}:</span>
+                                                            <span class='detail-value'>${field.value}</span>
                                                         </div>
-                                                        ` : ''}
-                                                        <div style='margin-top: 8px;'>
-                                                            <a href='${asset.url}' target='_blank' style='color: #0969da; text-decoration: none; font-size: 11px;'>
-                                                                View in Hudu →
-                                                            </a>
+                                                    `).join('') || ''}
+                                                    ${item.primary_serial ? `
+                                                        <div class='detail-row'>
+                                                            <span class='detail-label'>Serial:</span>
+                                                            <span class='detail-value'>${item.primary_serial}</span>
                                                         </div>
+                                                    ` : ''}
+                                                    ${item.primary_model ? `
+                                                        <div class='detail-row'>
+                                                            <span class='detail-label'>Model:</span>
+                                                            <span class='detail-value'>${item.primary_model}</span>
+                                                        </div>
+                                                    ` : ''}
+                                                    <div style='margin-top: 10px; padding-top: 10px; border-top: 1px solid #e1e4e8;'>
+                                                        <a href='${item.url}' target='_blank' style='color: #0969da; text-decoration: none; font-size: 11px;'>
+                                                            🔗 View in Hudu →
+                                                        </a>
                                                     </div>
                                                 </div>
-                                            `).join('')}
-                                        </div>
-                                        `;
+                                            </div>
+                                        `).join('');
                                     }).join('')}
                                 </div>
-                                ` : ''}
+                                ` : `
+                                <div class='detail-section'>
+                                    <p style='color: #586069; font-size: 12px; text-align: center; margin: 0;'>
+                                        אין פריטים מקושרים ללקוח זה
+                                    </p>
+                                </div>
+                                `}
                                 
                                 <!-- Footer -->
                                 <div style='background: #f6f8fa; padding: 12px; border: 1px solid #e1e4e8; border-radius: 0 0 8px 8px; text-align: center;'>
@@ -314,12 +369,25 @@ module.exports = async (req, res) => {
                                 </div>
                                 
                                 <script>
-                                    function toggleAsset(header) {
+                                    function toggleRelated(header) {
                                         const details = header.nextElementSibling;
+                                        const arrow = header.querySelector('span:last-child');
+                                        
                                         if (details.classList.contains('show')) {
                                             details.classList.remove('show');
+                                            arrow.style.transform = 'rotate(0deg)';
                                         } else {
+                                            // Close all other open items
+                                            document.querySelectorAll('.related-details.show').forEach(d => {
+                                                d.classList.remove('show');
+                                            });
+                                            document.querySelectorAll('.related-header span:last-child').forEach(a => {
+                                                a.style.transform = 'rotate(0deg)';
+                                            });
+                                            
+                                            // Open this item
                                             details.classList.add('show');
+                                            arrow.style.transform = 'rotate(180deg)';
                                         }
                                     }
                                 </script>
@@ -350,7 +418,7 @@ module.exports = async (req, res) => {
                 "statusCode": "200"
             };
             
-            console.log('Sending customer-specific response to BoldDesk');
+            console.log('Sending response with related items to BoldDesk');
             res.status(200).json(response);
             
         } catch (error) {
@@ -367,7 +435,7 @@ module.exports = async (req, res) => {
     // Handle GET requests
     else if (req.method === 'GET') {
         const testResponse = {
-            "message": "<div style='padding: 15px; background: #28a745; color: white; border-radius: 8px; text-align: center;'><h3>✅ BoldDesk-Hudu Integration Active</h3><p>Customer-specific assets version.</p></div>",
+            "message": "<div style='padding: 15px; background: #28a745; color: white; border-radius: 8px; text-align: center;'><h3>✅ BoldDesk-Hudu Integration Active</h3><p>Related items version.</p></div>",
             "statusCode": "200"
         };
         
