@@ -306,10 +306,21 @@ module.exports = async (req, res) => {
                                     <div class='field-grid'>
                                         ${customerAsset.fields?.filter(f => f.value && f.value.toString().trim()).slice(0, 8).map(field => `
                                             <div class='field-item'>
-                                                <div class='field-label'>${field.label}</div>
-                                                <div class='field-value'>${field.value}</div>
+                                                <div class='field-label'>${field.label || 'Field'}</div>
+                                                <div class='field-value'>${field.value || 'N/A'}</div>
                                             </div>
                                         `).join('') || '<div style="grid-column: 1 / -1; text-align: center; color: #666;">No fields available</div>'}
+                                        <!-- Show basic info if no fields -->
+                                        ${(!customerAsset.fields || customerAsset.fields.length === 0) ? `
+                                            <div class='field-item'>
+                                                <div class='field-label'>מזהה נכס</div>
+                                                <div class='field-value'>${customerAsset.id}</div>
+                                            </div>
+                                            <div class='field-item'>
+                                                <div class='field-label'>סוג נכס</div>
+                                                <div class='field-value'>${customerAsset.asset_type || 'N/A'}</div>
+                                            </div>
+                                        ` : ''}
                                     </div>
                                 </div>
                                 
@@ -336,21 +347,47 @@ module.exports = async (req, res) => {
                                                 <div class='related-header' onclick='toggleRelated(this)'>
                                                     <div class='related-title'>
                                                         <span>${icon}</span>
-                                                        <span>${item.name}</span>
+                                                        <span>${item.name || 'Unnamed Asset'}</span>
                                                         <span class='related-type'>${type}</span>
                                                         ${item.relation_description ? `<span class='relation-badge'>${item.relation_description}</span>` : ''}
                                                     </div>
                                                     <span style='color: #586069; font-size: 12px; transition: transform 0.2s;'>▼</span>
                                                 </div>
                                                 <div class='related-details'>
+                                                    <!-- Basic Asset Info -->
+                                                    <div class='detail-row'>
+                                                        <span class='detail-label'>Asset ID:</span>
+                                                        <span class='detail-value'>${item.id || 'N/A'}</span>
+                                                    </div>
+                                                    <div class='detail-row'>
+                                                        <span class='detail-label'>Asset Type:</span>
+                                                        <span class='detail-value'>${item.asset_type || 'N/A'}</span>
+                                                    </div>
+                                                    ${item.primary_serial ? `
+                                                    <div class='detail-row'>
+                                                        <span class='detail-label'>Serial Number:</span>
+                                                        <span class='detail-value'>${item.primary_serial}</span>
+                                                    </div>
+                                                    ` : ''}
+                                                    ${item.primary_mail ? `
+                                                    <div class='detail-row'>
+                                                        <span class='detail-label'>Email:</span>
+                                                        <span class='detail-value'>${item.primary_mail}</span>
+                                                    </div>
+                                                    ` : ''}
+                                                    <!-- Custom Fields -->
                                                     ${item.fields?.filter(f => f.value && f.value.toString().trim()).map(field => `
                                                         <div class='detail-row'>
-                                                            <span class='detail-label'>${field.label}:</span>
+                                                            <span class='detail-label'>${field.label || 'Field'}:</span>
                                                             <span class='detail-value'>${field.value}</span>
                                                         </div>
-                                                    `).join('') || '<div style="color: #666; font-style: italic;">No detailed fields available</div>'}
+                                                    `).join('') || ''}
+                                                    <!-- If no fields, show a message -->
+                                                    ${(!item.fields || item.fields.filter(f => f.value && f.value.toString().trim()).length === 0) ? 
+                                                        '<div style="color: #666; font-style: italic; padding: 10px 0;">No additional details available for this asset</div>' 
+                                                        : ''}
                                                     <div style='margin-top: 10px; padding-top: 10px; border-top: 1px solid #e1e4e8;'>
-                                                        <a href='${item.url}' target='_blank' style='color: #0969da; text-decoration: none; font-size: 11px;'>
+                                                        <a href='${item.url || '#'}' target='_blank' style='color: #0969da; text-decoration: none; font-size: 11px;'>
                                                             🔗 פתח ב-Hudu →
                                                         </a>
                                                     </div>
@@ -369,8 +406,14 @@ module.exports = async (req, res) => {
                                 `}
                                 
                                 <!-- Debug Info -->
-                                <div style='background: #fff5f5; padding: 8px; margin: 10px 0; border-radius: 4px; font-size: 11px; color: #666;'>
-                                    <strong>Debug:</strong> Found ${relatedAssets.length} related assets for "${customerAsset.name}" (ID: ${customerAsset.id})
+                                <div style='background: #f0f8ff; padding: 8px; margin: 10px 0; border-radius: 4px; font-size: 11px; color: #666; border-left: 3px solid #0969da;'>
+                                    <strong>🔍 Debug Info:</strong><br>
+                                    • Customer: "${customerAsset.name}" (ID: ${customerAsset.id})<br>
+                                    • Company: ${customerAsset.company_name} (ID: ${customerAsset.company_id})<br>
+                                    • Found ${relatedAssets.length} related assets<br>
+                                    ${relatedAssets.length > 0 ? 
+                                        '• Assets: ' + relatedAssets.map(a => `${a.name} (${a.asset_type})`).join(', ') 
+                                        : '• No related assets found through Relations API'}
                                 </div>
                                 
                                 <!-- Footer -->
