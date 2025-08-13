@@ -1,4 +1,4 @@
-// api/index.js - Show customer with their related items from Hudu
+// api/index.js - Search for assets containing customer name
 const axios = require('axios');
 
 // Environment variables
@@ -32,7 +32,7 @@ module.exports = async (req, res) => {
             // If we have an email and Hudu credentials
             if (email && HUDU_API_KEY && HUDU_BASE_URL) {
                 try {
-                    // 1. Search for the customer (People asset)
+                    // 1. Find the customer by email
                     const searchResponse = await axios.get(
                         `${HUDU_BASE_URL}/api/v1/assets`,
                         {
@@ -47,13 +47,12 @@ module.exports = async (req, res) => {
                         }
                     );
                     
-                    // Find the People/Contact asset
                     const allAssets = searchResponse.data?.assets || [];
                     const customerAsset = allAssets.find(asset => 
                         asset.asset_type?.toLowerCase().includes('people') ||
                         asset.asset_type?.toLowerCase().includes('person') ||
                         asset.asset_type?.toLowerCase().includes('contact') ||
-                        asset.name?.includes(email.split('@')[0])
+                        asset.fields?.some(f => f.value?.includes(email))
                     );
                     
                     if (!customerAsset) {
@@ -65,72 +64,15 @@ module.exports = async (req, res) => {
                         `;
                     } else {
                         console.log('Found customer:', customerAsset.name, 'ID:', customerAsset.id);
+                        console.log('Company ID:', customerAsset.company_id);
                         
-                        // 2. Get the specific asset details with relations
-                        let fullAssetDetails = null;
-                        let relatedItems = [];
+                        let relatedAssets = [];
                         
-                        try {
-                            // Get full asset details including relations
-                            const assetDetailResponse = await axios.get(
-                                `${HUDU_BASE_URL}/api/v1/assets/${customerAsset.id}`,
-                                {
-                                    headers: {
-                                        'x-api-key': HUDU_API_KEY,
-                                        'Content-Type': 'application/json'
-                                    }
-                                }
-                            );
-                            fullAssetDetails = assetDetailResponse.data?.asset;
-                            console.log('Got full asset details');
-                            
-                            // Get related items through relations endpoint if available
+                        // 2. Search for assets by customer name in the same company
+                        if (customerAsset.name && customerAsset.company_id) {
                             try {
-                                const relationsResponse = await axios.get(
-                                    `${HUDU_BASE_URL}/api/v1/relations`,
-                                    {
-                                        headers: {
-                                            'x-api-key': HUDU_API_KEY,
-                                            'Content-Type': 'application/json'
-                                        },
-                                        params: {
-                                            fromable_type: 'Asset',
-                                            fromable_id: customerAsset.id
-                                        }
-                                    }
-                                );
-                                
-                                const relations = relationsResponse.data?.relations || [];
-                                console.log(`Found ${relations.length} relations`);
-                                
-                                // Get details for each related asset
-                                for (const relation of relations) {
-                                    if (relation.toable_type === 'Asset' && relation.toable_id) {
-                                        try {
-                                            const relatedAssetResponse = await axios.get(
-                                                `${HUDU_BASE_URL}/api/v1/assets/${relation.toable_id}`,
-                                                {
-                                                    headers: {
-                                                        'x-api-key': HUDU_API_KEY,
-                                                        'Content-Type': 'application/json'
-                                                    }
-                                                }
-                                            );
-                                            if (relatedAssetResponse.data?.asset) {
-                                                relatedItems.push(relatedAssetResponse.data.asset);
-                                            }
-                                        } catch (e) {
-                                            console.log(`Could not fetch related asset ${relation.toable_id}`);
-                                        }
-                                    }
-                                }
-                            } catch (e) {
-                                console.log('Could not fetch relations:', e.message);
-                            }
-                            
-                            // Alternative: Search for Phone assets with matching customer name
-                            if (relatedItems.length === 0) {
-                                const phoneSearchResponse = await axios.get(
+                                // Search for assets containing the customer's name
+                                const nameSearchResponse = await axios.get(
                                     `${HUDU_BASE_URL}/api/v1/companies/${customerAsset.company_id}/assets`,
                                     {
                                         headers: {
@@ -138,48 +80,100 @@ module.exports = async (req, res) => {
                                             'Content-Type': 'application/json'
                                         },
                                         params: {
-                                            asset_layout_id: null,
-                                            page_size: 100
+                                            page_size: 200 // Get more assets to search through
                                         }
                                     }
                                 );
                                 
-                                const companyAssets = phoneSearchResponse.data?.assets || [];
+                                const companyAssets = nameSearchResponse.data?.assets || [];
+                                console.log(`Found ${companyAssets.length} assets in company`);
                                 
-                                // Find assets that might be related to this customer
-                                relatedItems = companyAssets.filter(asset => {
+                                // Filter assets that belong to this customer
+                                // Look for customer name in asset name or fields
+                                const customerName = customerAsset.name.toLowerCase();
+                                const customerFirstName = customerName.split(' ')[0];
+                                const customerLastName = customerName.split(' ').slice(-1)[0];
+                                
+                                relatedAssets = companyAssets.filter(asset => {
+                                    // Skip the customer asset itself
+                                    if (asset.id === customerAsset.id) return false;
+                                    
                                     // Check if asset name contains customer name
-                                    if (asset.name?.toLowerCase().includes(customerAsset.name.toLowerCase())) {
+                                    const assetName = asset.name?.toLowerCase() || '';
+                                    if (assetName.includes(customerName) || 
+                                        assetName.includes(customerFirstName) ||
+                                        assetName.includes(customerLastName)) {
+                                        console.log(`Found related by name: ${asset.name} (${asset.asset_type})`);
                                         return true;
                                     }
-                                    // Check if any field contains customer name or ID
-                                    if (asset.fields) {
-                                        return asset.fields.some(field => 
-                                            field.value?.toString().toLowerCase().includes(customerAsset.name.toLowerCase()) ||
-                                            field.value?.toString().includes(customerAsset.id.toString())
-                                        );
+                                    
+                                    // Check if any field contains customer name or refers to this person
+                                    if (asset.fields && asset.fields.length > 0) {
+                                        const hasCustomerReference = asset.fields.some(field => {
+                                            const fieldValue = (field.value || '').toString().toLowerCase();
+                                            // Check for customer name in fields
+                                            if (fieldValue.includes(customerName) || 
+                                                fieldValue.includes(customerFirstName) ||
+                                                fieldValue.includes(customerLastName)) {
+                                                return true;
+                                            }
+                                            // Check for fields labeled as "owner", "user", "assigned to", etc.
+                                            const fieldLabel = (field.label || '').toLowerCase();
+                                            if ((fieldLabel.includes('owner') || 
+                                                 fieldLabel.includes('user') || 
+                                                 fieldLabel.includes('assigned') ||
+                                                 fieldLabel.includes('person') ||
+                                                 fieldLabel.includes('contact')) &&
+                                                fieldValue.includes(customerFirstName)) {
+                                                return true;
+                                            }
+                                            return false;
+                                        });
+                                        
+                                        if (hasCustomerReference) {
+                                            console.log(`Found related by field: ${asset.name} (${asset.asset_type})`);
+                                            return true;
+                                        }
                                     }
+                                    
                                     return false;
                                 });
                                 
-                                console.log(`Found ${relatedItems.length} potentially related items`);
+                                console.log(`Filtered to ${relatedAssets.length} related assets`);
+                                
+                                // Also specifically look for Phone assets that might use a different naming
+                                if (relatedAssets.length === 0) {
+                                    // Try to find Phone assets with any reference to the customer
+                                    const phoneAssets = companyAssets.filter(asset => 
+                                        asset.asset_type?.toLowerCase().includes('phone') &&
+                                        asset.id !== customerAsset.id
+                                    );
+                                    
+                                    // Check if customer has a phone field that matches any phone asset
+                                    const customerPhone = customerAsset.fields?.find(f => 
+                                        f.label?.toLowerCase().includes('phone') || 
+                                        f.label?.toLowerCase().includes('טלפון')
+                                    )?.value;
+                                    
+                                    if (customerPhone) {
+                                        relatedAssets = phoneAssets.filter(asset => {
+                                            const phoneNumber = asset.fields?.find(f => 
+                                                f.label?.toLowerCase().includes('number') ||
+                                                f.label?.toLowerCase().includes('phone')
+                                            )?.value;
+                                            return phoneNumber === customerPhone;
+                                        });
+                                    }
+                                }
+                                
+                            } catch (e) {
+                                console.log('Error searching for related assets:', e.message);
                             }
-                            
-                        } catch (e) {
-                            console.log('Could not fetch asset details:', e.message);
                         }
                         
-                        // Extract customer fields
-                        const getFieldValue = (asset, fieldName) => {
-                            const field = asset.fields?.find(f => 
-                                f.label?.toLowerCase().includes(fieldName.toLowerCase())
-                            );
-                            return field?.value || null;
-                        };
-                        
-                        // Group related items by type
+                        // Group related assets by type
                         const groupedRelated = {};
-                        relatedItems.forEach(item => {
+                        relatedAssets.forEach(item => {
                             const type = item.asset_type || 'Other';
                             if (!groupedRelated[type]) {
                                 groupedRelated[type] = [];
@@ -267,7 +261,7 @@ module.exports = async (req, res) => {
                                     }
                                     .detail-label {
                                         color: #586069;
-                                        min-width: 100px;
+                                        min-width: 120px;
                                     }
                                     .detail-value {
                                         color: #24292e;
@@ -301,11 +295,11 @@ module.exports = async (req, res) => {
                                     </div>
                                 </div>
                                 
-                                <!-- Related Items -->
-                                ${relatedItems.length > 0 ? `
+                                <!-- Related Assets -->
+                                ${relatedAssets.length > 0 ? `
                                 <div class='detail-section'>
                                     <h4 style='margin: 0 0 10px 0; color: #24292e; font-size: 14px;'>
-                                        🔗 פריטים מקושרים (${relatedItems.length})
+                                        🔗 נכסים של ${customerAsset.name.split(' ')[0]} (${relatedAssets.length})
                                     </h4>
                                     ${Object.entries(groupedRelated).map(([type, items]) => {
                                         let icon = '📄';
@@ -313,6 +307,8 @@ module.exports = async (req, res) => {
                                         else if (type.toLowerCase().includes('computer')) icon = '💻';
                                         else if (type.toLowerCase().includes('password')) icon = '🔐';
                                         else if (type.toLowerCase().includes('license')) icon = '🔑';
+                                        else if (type.toLowerCase().includes('printer')) icon = '🖨️';
+                                        else if (type.toLowerCase().includes('network')) icon = '🔌';
                                         
                                         return items.map(item => `
                                             <div class='related-item'>
@@ -331,21 +327,9 @@ module.exports = async (req, res) => {
                                                             <span class='detail-value'>${field.value}</span>
                                                         </div>
                                                     `).join('') || ''}
-                                                    ${item.primary_serial ? `
-                                                        <div class='detail-row'>
-                                                            <span class='detail-label'>Serial:</span>
-                                                            <span class='detail-value'>${item.primary_serial}</span>
-                                                        </div>
-                                                    ` : ''}
-                                                    ${item.primary_model ? `
-                                                        <div class='detail-row'>
-                                                            <span class='detail-label'>Model:</span>
-                                                            <span class='detail-value'>${item.primary_model}</span>
-                                                        </div>
-                                                    ` : ''}
                                                     <div style='margin-top: 10px; padding-top: 10px; border-top: 1px solid #e1e4e8;'>
                                                         <a href='${item.url}' target='_blank' style='color: #0969da; text-decoration: none; font-size: 11px;'>
-                                                            🔗 View in Hudu →
+                                                            🔗 פתח ב-Hudu →
                                                         </a>
                                                     </div>
                                                 </div>
@@ -354,12 +338,18 @@ module.exports = async (req, res) => {
                                     }).join('')}
                                 </div>
                                 ` : `
-                                <div class='detail-section'>
-                                    <p style='color: #586069; font-size: 12px; text-align: center; margin: 0;'>
-                                        אין פריטים מקושרים ללקוח זה
+                                <div class='detail-section' style='text-align: center;'>
+                                    <p style='color: #586069; font-size: 12px; margin: 0;'>
+                                        🔍 מחפש נכסים של ${customerAsset.name}...<br>
+                                        <small>לא נמצאו נכסים המקושרים ללקוח זה</small>
                                     </p>
                                 </div>
                                 `}
+                                
+                                <!-- Debug Info -->
+                                <div style='background: #fff5f5; padding: 8px; margin: 10px 0; border-radius: 4px; font-size: 11px; color: #666;'>
+                                    <strong>Debug:</strong> Found ${relatedAssets.length} assets for "${customerAsset.name}" in company #${customerAsset.company_id}
+                                </div>
                                 
                                 <!-- Footer -->
                                 <div style='background: #f6f8fa; padding: 12px; border: 1px solid #e1e4e8; border-radius: 0 0 8px 8px; text-align: center;'>
@@ -418,7 +408,7 @@ module.exports = async (req, res) => {
                 "statusCode": "200"
             };
             
-            console.log('Sending response with related items to BoldDesk');
+            console.log('Sending response to BoldDesk');
             res.status(200).json(response);
             
         } catch (error) {
@@ -435,7 +425,7 @@ module.exports = async (req, res) => {
     // Handle GET requests
     else if (req.method === 'GET') {
         const testResponse = {
-            "message": "<div style='padding: 15px; background: #28a745; color: white; border-radius: 8px; text-align: center;'><h3>✅ BoldDesk-Hudu Integration Active</h3><p>Related items version.</p></div>",
+            "message": "<div style='padding: 15px; background: #28a745; color: white; border-radius: 8px; text-align: center;'><h3>✅ BoldDesk-Hudu Integration Active</h3><p>Search by name version.</p></div>",
             "statusCode": "200"
         };
         
