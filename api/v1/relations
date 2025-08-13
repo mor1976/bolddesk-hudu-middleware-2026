@@ -112,6 +112,10 @@ module.exports = async (req, res) => {
                                 const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
                                 
                                 console.log('Looking for assets related to:', { customerName, firstName, lastName });
+                                console.log('All company assets:');
+                                allCompanyAssets.forEach(asset => {
+                                    console.log(`- ${asset.name} (${asset.asset_type}) [ID: ${asset.id}]`);
+                                });
                                 
                                 // More comprehensive search logic
                                 relatedAssets = allCompanyAssets.filter(asset => {
