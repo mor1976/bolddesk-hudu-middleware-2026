@@ -47,153 +47,179 @@ module.exports = async (req, res) => {
                     
                     console.log('Found customer:', customerAsset.name, 'ID:', customerAsset.id);
                     
-                    // 2. Get full customer asset details to check for related_items
-                    let detailedCustomerAsset = customerAsset;
+                    // 2. Try to get related assets using proper Relations API
+                    let relatedAssets = [];
+                    
                     try {
-                        const customerDetailResponse = await axios.get(`${HUDU_BASE_URL}/api/v1/assets/${customerAsset.id}`, {
-                            headers: { 'x-api-key': HUDU_API_KEY, 'Content-Type': 'application/json' }
-                        });
+                        console.log('Attempting to fetch relations for customer asset ID:', customerAsset.id);
                         
-                        if (customerDetailResponse.data?.asset) {
-                            detailedCustomerAsset = customerDetailResponse.data.asset;
-                            console.log('Got detailed customer asset with', Object.keys(detailedCustomerAsset).length, 'properties');
-                            console.log('Customer asset properties:', Object.keys(detailedCustomerAsset));
+                        // First try: GET /relations (List All Relations)
+                        let relationsResponse;
+                        try {
+                            console.log('Trying GET /relations...');
+                            relationsResponse = await axios.get(`${HUDU_BASE_URL}/api/v1/relations`, {
+                                headers: { 'x-api-key': HUDU_API_KEY, 'Content-Type': 'application/json' }
+                            });
+                            console.log('GET /relations successful, got', relationsResponse.data?.relations?.length || 0, 'total relations');
                             
-                            // Check if there are any related items or relations in the detailed asset
-                            if (detailedCustomerAsset.related_items) {
-                                console.log('Found related_items:', detailedCustomerAsset.related_items);
+                            // Filter relations that involve our customer asset
+                            const allRelations = relationsResponse.data?.relations || [];
+                            const customerRelations = allRelations.filter(relation => 
+                                (relation.fromable_type === 'Asset' && relation.fromable_id === customerAsset.id) ||
+                                (relation.toable_type === 'Asset' && relation.toable_id === customerAsset.id)
+                            );
+                            
+                            console.log('Found', customerRelations.length, 'relations involving customer asset');
+                            
+                            // Process each relation to get the related asset details
+                            for (const relation of customerRelations) {
+                                try {
+                                    console.log('Processing relation:', JSON.stringify(relation, null, 2));
+                                    
+                                    let relatedAssetId = null;
+                                    let relationType = 'Related';
+                                    
+                                    // Determine which asset is the related one (not the customer)
+                                    if (relation.fromable_type === 'Asset' && relation.fromable_id === customerAsset.id) {
+                                        // Customer is the 'from', so get the 'to' asset
+                                        if (relation.toable_type === 'Asset') {
+                                            relatedAssetId = relation.toable_id;
+                                            relationType = relation.description || 'קשור אל';
+                                        }
+                                    } else if (relation.toable_type === 'Asset' && relation.toable_id === customerAsset.id) {
+                                        // Customer is the 'to', so get the 'from' asset
+                                        if (relation.fromable_type === 'Asset') {
+                                            relatedAssetId = relation.fromable_id;
+                                            relationType = relation.description || 'קשור מ';
+                                        }
+                                    }
+                                    
+                                    if (relatedAssetId) {
+                                        console.log(`Fetching details for related asset ID: ${relatedAssetId}`);
+                                        
+                                        // Get the full asset details
+                                        const assetResponse = await axios.get(`${HUDU_BASE_URL}/api/v1/assets/${relatedAssetId}`, {
+                                            headers: { 'x-api-key': HUDU_API_KEY, 'Content-Type': 'application/json' }
+                                        });
+                                        
+                                        if (assetResponse.data?.asset) {
+                                            const relatedAsset = assetResponse.data.asset;
+                                            relatedAsset.relation_type = relationType;
+                                            relatedAsset.relation_id = relation.id;
+                                            relatedAsset.match_reason = `Relations API: ${relationType}`;
+                                            relatedAsset.confidence = 'relations';
+                                            relatedAssets.push(relatedAsset);
+                                            console.log(`✓ Added related asset via Relations API: ${relatedAsset.name} (${relatedAsset.asset_type}) - ${relationType}`);
+                                        }
+                                    }
+                                    
+                                } catch (assetError) {
+                                    console.error('Error fetching related asset details:', assetError.message);
+                                }
                             }
-                            if (detailedCustomerAsset.relations) {
-                                console.log('Found relations:', detailedCustomerAsset.relations);
-                            }
+                            
+                        } catch (getRelationsError) {
+                            console.log('GET /relations failed:', getRelationsError.message);
                         }
-                    } catch (detailError) {
-                        console.log('Could not get detailed customer asset:', detailError.message);
+                        
+                        console.log(`Relations API found ${relatedAssets.length} related assets`);
+                        
+                    } catch (relationsError) {
+                        console.error('Relations API completely failed:', relationsError.message);
                     }
                     
-                    // 3. Get ALL assets in the same company with improved filtering
-                    let allCompanyAssets = [];
-                    let page = 1;
-                    let hasMorePages = true;
-                    
-                    while (hasMorePages && page <= 10) {
-                        const companyResponse = await axios.get(`${HUDU_BASE_URL}/api/v1/companies/${customerAsset.company_id}/assets`, {
-                            headers: { 'x-api-key': HUDU_API_KEY, 'Content-Type': 'application/json' },
-                            params: { page: page, page_size: 100 }
+                    // 3. If Relations API didn't find anything, fall back to smart matching
+                    if (relatedAssets.length === 0) {
+                        console.log('Relations API found no assets, falling back to smart matching...');
+                        
+                        // Get ALL assets in the same company with improved filtering
+                        let allCompanyAssets = [];
+                        let page = 1;
+                        let hasMorePages = true;
+                        
+                        while (hasMorePages && page <= 10) {
+                            const companyResponse = await axios.get(`${HUDU_BASE_URL}/api/v1/companies/${customerAsset.company_id}/assets`, {
+                                headers: { 'x-api-key': HUDU_API_KEY, 'Content-Type': 'application/json' },
+                                params: { page: page, page_size: 100 }
+                            });
+                            
+                            const pageAssets = companyResponse.data?.assets || [];
+                            allCompanyAssets = allCompanyAssets.concat(pageAssets);
+                            hasMorePages = pageAssets.length === 100;
+                            page++;
+                        }
+                        
+                        console.log(`Found ${allCompanyAssets.length} total assets in company for smart matching`);
+                        
+                        // Smart matching logic (simplified version)
+                        const customerName = customerAsset.name.toLowerCase().trim();
+                        const nameParts = customerName.split(/\s+/);
+                        const firstName = nameParts[0];
+                        const lastName = nameParts[nameParts.length - 1];
+                        
+                        // Filter out people/contact assets first
+                        const nonPeopleAssets = allCompanyAssets.filter(asset => {
+                            const assetType = (asset.asset_type || '').toLowerCase();
+                            return asset.id !== customerAsset.id && 
+                                   !assetType.includes('people') && 
+                                   !assetType.includes('person') && 
+                                   !assetType.includes('contact');
                         });
                         
-                        const pageAssets = companyResponse.data?.assets || [];
-                        allCompanyAssets = allCompanyAssets.concat(pageAssets);
-                        hasMorePages = pageAssets.length === 100;
-                        page++;
-                    }
-                    
-                    console.log(`Found ${allCompanyAssets.length} total assets in company`);
-                    
-                    // 4. Very aggressive matching - assume most user-type assets belong to customer
-                    const customerName = customerAsset.name.toLowerCase().trim();
-                    const nameParts = customerName.split(/\s+/);
-                    const firstName = nameParts[0];
-                    const lastName = nameParts[nameParts.length - 1];
-                    
-                    // Filter out people/contact assets first
-                    const nonPeopleAssets = allCompanyAssets.filter(asset => {
-                        const assetType = (asset.asset_type || '').toLowerCase();
-                        return asset.id !== customerAsset.id && 
-                               !assetType.includes('people') && 
-                               !assetType.includes('person') && 
-                               !assetType.includes('contact');
-                    });
-                    
-                    console.log(`Found ${nonPeopleAssets.length} non-people assets to check`);
-                    
-                    const relatedAssets = nonPeopleAssets.filter(asset => {
-                        const assetName = (asset.name || '').toLowerCase();
-                        const assetType = (asset.asset_type || '').toLowerCase();
+                        console.log(`Found ${nonPeopleAssets.length} non-people assets to check`);
                         
-                        console.log(`Checking: "${asset.name}" (${asset.asset_type})`);
-                        
-                        // Method 1: Direct name match (highest priority)
-                        if (firstName && firstName.length > 2 && assetName.includes(firstName)) {
-                            console.log(`✓ HIGH: Name contains "${firstName}"`);
-                            asset.match_reason = `שם מכיל "${firstName}"`;
-                            asset.confidence = 'high';
-                            return true;
-                        }
-                        
-                        if (lastName && lastName.length > 2 && assetName.includes(lastName)) {
-                            console.log(`✓ HIGH: Name contains "${lastName}"`);
-                            asset.match_reason = `שם מכיל "${lastName}"`;
-                            asset.confidence = 'high';
-                            return true;
-                        }
-                        
-                        // Method 2: Field matching (high priority)
-                        if (asset.fields && asset.fields.length > 0) {
-                            for (const field of asset.fields) {
-                                const fieldValue = (field.value || '').toString().toLowerCase();
-                                const fieldLabel = (field.label || '').toLowerCase();
-                                
-                                if (firstName && firstName.length > 2 && fieldValue.includes(firstName)) {
-                                    console.log(`✓ HIGH: Field "${field.label}" contains "${firstName}"`);
-                                    asset.match_reason = `שדה "${field.label}"`;
-                                    asset.confidence = 'high';
-                                    return true;
-                                }
-                                
-                                if (lastName && lastName.length > 2 && fieldValue.includes(lastName)) {
-                                    console.log(`✓ HIGH: Field "${field.label}" contains "${lastName}"`);
-                                    asset.match_reason = `שדה "${field.label}"`;
-                                    asset.confidence = 'high';
-                                    return true;
-                                }
-                                
-                                // Owner/user fields
-                                if ((fieldLabel.includes('user') || fieldLabel.includes('owner') || 
-                                     fieldLabel.includes('assigned') || fieldLabel.includes('name') ||
-                                     fieldLabel.includes('שם') || fieldLabel.includes('בעלים') ||
-                                     fieldLabel.includes('משתמש')) &&
-                                    (fieldValue.includes(firstName) || (lastName && fieldValue.includes(lastName)))) {
-                                    console.log(`✓ HIGH: Owner field "${field.label}"`);
-                                    asset.match_reason = `בעלות: ${field.label}`;
-                                    asset.confidence = 'high';
-                                    return true;
+                        relatedAssets = nonPeopleAssets.filter(asset => {
+                            const assetName = (asset.name || '').toLowerCase();
+                            const assetType = (asset.asset_type || '').toLowerCase();
+                            
+                            // Method 1: Direct name match (highest priority)
+                            if (firstName && firstName.length > 2 && assetName.includes(firstName)) {
+                                asset.match_reason = `שם מכיל "${firstName}"`;
+                                asset.confidence = 'high';
+                                return true;
+                            }
+                            
+                            if (lastName && lastName.length > 2 && assetName.includes(lastName)) {
+                                asset.match_reason = `שם מכיל "${lastName}"`;
+                                asset.confidence = 'high';
+                                return true;
+                            }
+                            
+                            // Method 2: Field matching (high priority)
+                            if (asset.fields && asset.fields.length > 0) {
+                                for (const field of asset.fields) {
+                                    const fieldValue = (field.value || '').toString().toLowerCase();
+                                    const fieldLabel = (field.label || '').toLowerCase();
+                                    
+                                    if (firstName && firstName.length > 2 && fieldValue.includes(firstName)) {
+                                        asset.match_reason = `שדה "${field.label}"`;
+                                        asset.confidence = 'high';
+                                        return true;
+                                    }
+                                    
+                                    if (lastName && lastName.length > 2 && fieldValue.includes(lastName)) {
+                                        asset.match_reason = `שדה "${field.label}"`;
+                                        asset.confidence = 'high';
+                                        return true;
+                                    }
                                 }
                             }
-                        }
+                            
+                            // Method 3: Small company logic (medium priority)
+                            const userAssetTypes = ['computer', 'email', 'print', 'phone', 'license', 'mobile', 'laptop', 'device'];
+                            const isUserAsset = userAssetTypes.some(type => assetType.includes(type));
+                            
+                            if (isUserAsset && nonPeopleAssets.length <= 15) {
+                                asset.match_reason = 'נכס משתמש - חברה קטנה';
+                                asset.confidence = 'medium';
+                                return true;
+                            }
+                            
+                            return false;
+                        });
                         
-                        // Method 3: User asset types in small companies (medium priority)
-                        const userAssetTypes = ['computer', 'email', 'print', 'phone', 'license', 'mobile', 'laptop', 'device'];
-                        const isUserAsset = userAssetTypes.some(type => assetType.includes(type));
-                        
-                        if (isUserAsset && nonPeopleAssets.length <= 15) {
-                            console.log(`✓ MEDIUM: User asset in small company`);
-                            asset.match_reason = 'נכס משתמש - חברה קטנה';
-                            asset.confidence = 'medium';
-                            return true;
-                        }
-                        
-                        // Method 4: Single asset of type (medium priority)
-                        const sameTypeAssets = nonPeopleAssets.filter(a => a.asset_type === asset.asset_type);
-                        if (sameTypeAssets.length === 1 && (isUserAsset || assetType.includes('server'))) {
-                            console.log(`✓ MEDIUM: Only asset of type "${asset.asset_type}"`);
-                            asset.match_reason = 'נכס יחיד מסוגו';
-                            asset.confidence = 'medium';
-                            return true;
-                        }
-                        
-                        console.log(`✗ No match: ${asset.name}`);
-                        return false;
-                    });
-                    
-                    // Sort by confidence
-                    relatedAssets.sort((a, b) => {
-                        if (a.confidence === 'high' && b.confidence !== 'high') return -1;
-                        if (b.confidence === 'high' && a.confidence !== 'high') return 1;
-                        return 0;
-                    });
-                    
-                    console.log(`Final result: ${relatedAssets.length} related assets found`);
+                        console.log(`Smart matching found ${relatedAssets.length} related assets`);
+                    }
                     
                     // 5. Create HTML response
                     const htmlMessage = `
@@ -376,6 +402,14 @@ module.exports = async (req, res) => {
                                     color: #64748b;
                                     transition: transform 0.2s;
                                 }
+                                .relations-api-badge {
+                                    background: #10b981;
+                                    color: white;
+                                    padding: 2px 6px;
+                                    border-radius: 8px;
+                                    font-size: 8px;
+                                    font-weight: 600;
+                                }
                                 .smart-badge {
                                     background: #8b5cf6;
                                     color: white;
@@ -383,6 +417,14 @@ module.exports = async (req, res) => {
                                     border-radius: 8px;
                                     font-size: 8px;
                                     font-weight: 600;
+                                }
+                                .confidence-relations {
+                                    background: #10b981;
+                                    color: white;
+                                    padding: 2px 6px;
+                                    border-radius: 8px;
+                                    font-size: 9px;
+                                    font-weight: 500;
                                 }
                             </style>
                             
@@ -411,7 +453,9 @@ module.exports = async (req, res) => {
                                 <div class='assets-section'>
                                     <h3>
                                         🔗 נכסים קשורים (${relatedAssets.length})
-                                        <span class='smart-badge'>Smart Match</span>
+                                        ${relatedAssets.length > 0 && relatedAssets[0].confidence === 'relations' ? 
+                                            '<span class="relations-api-badge">Relations API</span>' : 
+                                            '<span class="smart-badge">Smart Match</span>'}
                                     </h3>
                                     
                                     ${relatedAssets.length > 0 ? relatedAssets.map(item => {
