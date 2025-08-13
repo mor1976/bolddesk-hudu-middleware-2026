@@ -1,4 +1,4 @@
-// Smart search for related assets with beautiful design
+// Compact and smart search for related assets
 const axios = require('axios');
 
 const HUDU_API_KEY = process.env.HUDU_API_KEY;
@@ -60,7 +60,9 @@ module.exports = async (req, res) => {
                         page++;
                     }
                     
-                    // 3. Enhanced smart matching for related assets
+                    console.log(`Found ${allCompanyAssets.length} total assets in company`);
+                    
+                    // 3. Much more aggressive matching for related assets
                     const customerName = customerAsset.name.toLowerCase().trim();
                     const nameParts = customerName.split(/\s+/);
                     const firstName = nameParts[0];
@@ -72,16 +74,18 @@ module.exports = async (req, res) => {
                         const assetName = (asset.name || '').toLowerCase();
                         const assetType = (asset.asset_type || '').toLowerCase();
                         
+                        console.log(`Checking: ${asset.name} (${asset.asset_type})`);
+                        
                         // Method 1: Direct name match
                         if (firstName && firstName.length > 2 && assetName.includes(firstName)) {
-                            asset.match_reason = `שם מכיל "${firstName}"`;
-                            asset.confidence = 'high';
+                            console.log(`✓ Name match (first): ${asset.name}`);
+                            asset.match_reason = `מכיל "${firstName}"`;
                             return true;
                         }
                         
                         if (lastName && lastName.length > 2 && assetName.includes(lastName)) {
-                            asset.match_reason = `שם מכיל "${lastName}"`;
-                            asset.confidence = 'high';
+                            console.log(`✓ Name match (last): ${asset.name}`);
+                            asset.match_reason = `מכיל "${lastName}"`;
                             return true;
                         }
                         
@@ -92,14 +96,14 @@ module.exports = async (req, res) => {
                                 const fieldLabel = (field.label || '').toLowerCase();
                                 
                                 if (firstName && firstName.length > 2 && fieldValue.includes(firstName)) {
-                                    asset.match_reason = `שדה "${field.label}" מכיל "${firstName}"`;
-                                    asset.confidence = 'high';
+                                    console.log(`✓ Field match: ${asset.name} in ${field.label}`);
+                                    asset.match_reason = `שדה: ${field.label}`;
                                     return true;
                                 }
                                 
                                 if (lastName && lastName.length > 2 && fieldValue.includes(lastName)) {
-                                    asset.match_reason = `שדה "${field.label}" מכיל "${lastName}"`;
-                                    asset.confidence = 'high';
+                                    console.log(`✓ Field match: ${asset.name} in ${field.label}`);
+                                    asset.match_reason = `שדה: ${field.label}`;
                                     return true;
                                 }
                                 
@@ -109,316 +113,253 @@ module.exports = async (req, res) => {
                                      fieldLabel.includes('שם') || fieldLabel.includes('בעלים') ||
                                      fieldLabel.includes('משתמש')) &&
                                     (fieldValue.includes(firstName) || (lastName && fieldValue.includes(lastName)))) {
-                                    asset.match_reason = `שדה בעלות: "${field.label}"`;
-                                    asset.confidence = 'high';
+                                    console.log(`✓ Owner field: ${asset.name}`);
+                                    asset.match_reason = `בעלות: ${field.label}`;
                                     return true;
                                 }
                             }
                         }
                         
-                        // Method 3: Small company logic - if very few assets, likely belongs to customer
-                        const nonPeopleAssets = allCompanyAssets.filter(a => 
-                            !a.asset_type?.toLowerCase().includes('people') &&
-                            !a.asset_type?.toLowerCase().includes('person') &&
-                            !a.asset_type?.toLowerCase().includes('contact')
-                        );
+                        // Method 3: Small company - assume user assets belong to customer
+                        const userAssetTypes = ['computer', 'email', 'print', 'phone', 'license', 'device', 'mobile', 'laptop'];
+                        const isUserAsset = userAssetTypes.some(type => assetType.includes(type));
                         
-                        if (nonPeopleAssets.length <= 8 && 
-                            (assetType.includes('computer') || assetType.includes('email') || 
-                             assetType.includes('print') || assetType.includes('phone') ||
-                             assetType.includes('license') || assetType.includes('device'))) {
-                            asset.match_reason = 'חברה קטנה - נכס של משתמש';
-                            asset.confidence = 'medium';
-                            return true;
+                        if (isUserAsset) {
+                            // Count non-people assets in company
+                            const nonPeopleAssets = allCompanyAssets.filter(a => 
+                                !a.asset_type?.toLowerCase().includes('people') &&
+                                !a.asset_type?.toLowerCase().includes('person') &&
+                                !a.asset_type?.toLowerCase().includes('contact')
+                            );
+                            
+                            // If small company (<=10 non-people assets), assume it belongs to customer
+                            if (nonPeopleAssets.length <= 10) {
+                                console.log(`✓ Small company user asset: ${asset.name}`);
+                                asset.match_reason = 'חברה קטנה - נכס משתמש';
+                                return true;
+                            }
                         }
                         
+                        // Method 4: Assets that are commonly single-user per company
+                        const singleUserTypes = ['email', 'computer', 'laptop'];
+                        if (singleUserTypes.some(type => assetType.includes(type))) {
+                            // If there's only one of this type, it's probably the customer's
+                            const sameTypeAssets = allCompanyAssets.filter(a => 
+                                a.asset_type?.toLowerCase() === asset.asset_type?.toLowerCase() &&
+                                a.id !== customerAsset.id
+                            );
+                            
+                            if (sameTypeAssets.length === 1) {
+                                console.log(`✓ Only one of type: ${asset.name}`);
+                                asset.match_reason = 'נכס יחיד מסוגו';
+                                return true;
+                            }
+                        }
+                        
+                        console.log(`✗ No match: ${asset.name}`);
                         return false;
                     });
                     
-                    // Sort by confidence (high confidence first)
-                    relatedAssets.sort((a, b) => {
-                        if (a.confidence === 'high' && b.confidence !== 'high') return -1;
-                        if (b.confidence === 'high' && a.confidence !== 'high') return 1;
-                        return 0;
-                    });
+                    console.log(`Found ${relatedAssets.length} related assets:`, relatedAssets.map(a => a.name));
                     
-                    // 4. Create beautiful HTML
+                    // 4. Create compact HTML
                     const htmlMessage = `
-                        <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; background: #ffffff; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); overflow: hidden; margin: -10px;'>
+                        <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 13px; max-width: 100%;'>
                             <style>
-                                .customer-header {
+                                .header {
                                     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                                     color: white;
-                                    padding: 20px;
-                                    position: relative;
-                                }
-                                .customer-header::before {
-                                    content: '';
-                                    position: absolute;
-                                    top: 0;
-                                    left: 0;
-                                    right: 0;
-                                    bottom: 0;
-                                    background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="20" cy="20" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="80" cy="30" r="1.5" fill="rgba(255,255,255,0.1)"/><circle cx="40" cy="70" r="1" fill="rgba(255,255,255,0.1)"/></svg>');
-                                }
-                                .customer-info {
-                                    position: relative;
-                                    z-index: 1;
-                                    display: flex;
-                                    justify-content: space-between;
-                                    align-items: center;
+                                    padding: 12px 15px;
+                                    border-radius: 8px 8px 0 0;
+                                    margin: -10px -10px 0 -10px;
                                 }
                                 .customer-name {
-                                    font-size: 18px;
+                                    font-size: 16px;
                                     font-weight: 600;
                                     margin: 0;
                                     display: flex;
                                     align-items: center;
-                                    gap: 10px;
+                                    justify-content: space-between;
                                 }
                                 .company-badge {
                                     background: rgba(255,255,255,0.2);
-                                    padding: 6px 12px;
-                                    border-radius: 20px;
-                                    font-size: 12px;
-                                    font-weight: 500;
-                                    backdrop-filter: blur(10px);
-                                }
-                                .content-section {
-                                    padding: 20px;
-                                }
-                                .customer-details {
-                                    background: linear-gradient(135deg, #f8f9ff 0%, #f0f4ff 100%);
+                                    padding: 4px 8px;
                                     border-radius: 12px;
-                                    padding: 20px;
-                                    margin-bottom: 25px;
-                                    border: 1px solid rgba(102, 126, 234, 0.1);
+                                    font-size: 11px;
                                 }
-                                .section-title {
-                                    font-size: 16px;
-                                    font-weight: 600;
-                                    color: #2d3748;
-                                    margin: 0 0 15px 0;
-                                    display: flex;
-                                    align-items: center;
-                                    gap: 8px;
-                                }
-                                .field-grid {
-                                    display: grid;
-                                    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-                                    gap: 15px;
-                                }
-                                .field-card {
-                                    background: white;
+                                .content {
                                     padding: 15px;
+                                    background: #f8f9fa;
+                                    border-radius: 0 0 8px 8px;
+                                    margin: 0 -10px -10px -10px;
+                                }
+                                .customer-info {
+                                    background: white;
                                     border-radius: 8px;
+                                    padding: 12px;
+                                    margin-bottom: 15px;
                                     border: 1px solid #e2e8f0;
-                                    transition: all 0.2s ease;
                                 }
-                                .field-card:hover {
-                                    transform: translateY(-2px);
-                                    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-                                }
-                                .field-label {
-                                    color: #64748b;
+                                .info-grid {
+                                    display: grid;
+                                    grid-template-columns: 1fr 1fr;
+                                    gap: 8px;
                                     font-size: 12px;
-                                    font-weight: 500;
-                                    margin-bottom: 5px;
-                                    text-transform: uppercase;
-                                    letter-spacing: 0.5px;
                                 }
-                                .field-value {
-                                    color: #1e293b;
-                                    font-size: 14px;
+                                .info-item {
+                                    padding: 6px;
+                                    background: #f8f9fa;
+                                    border-radius: 4px;
+                                }
+                                .info-label {
+                                    color: #64748b;
+                                    font-size: 10px;
                                     font-weight: 600;
+                                    margin-bottom: 2px;
+                                }
+                                .info-value {
+                                    color: #1e293b;
+                                    font-weight: 500;
                                     word-break: break-word;
                                 }
-                                .assets-section {
-                                    background: linear-gradient(135deg, #fff8f0 0%, #fff4e6 100%);
-                                    border-radius: 12px;
-                                    padding: 20px;
-                                    border: 1px solid rgba(251, 146, 60, 0.1);
+                                .assets-section h3 {
+                                    font-size: 14px;
+                                    color: #1e293b;
+                                    margin: 0 0 10px 0;
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 6px;
                                 }
-                                .asset-card {
+                                .asset-item {
                                     background: white;
-                                    border-radius: 12px;
-                                    margin: 15px 0;
-                                    overflow: hidden;
+                                    border-radius: 6px;
+                                    margin: 8px 0;
                                     border: 1px solid #e2e8f0;
-                                    transition: all 0.3s ease;
-                                    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-                                }
-                                .asset-card:hover {
-                                    transform: translateY(-4px);
-                                    box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+                                    overflow: hidden;
                                 }
                                 .asset-header {
-                                    padding: 18px;
-                                    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+                                    padding: 10px 12px;
+                                    background: #f8f9fa;
                                     cursor: pointer;
                                     display: flex;
                                     justify-content: space-between;
                                     align-items: center;
                                     border-bottom: 1px solid #e2e8f0;
                                 }
-                                .asset-title-section {
+                                .asset-header:hover {
+                                    background: #f1f5f9;
+                                }
+                                .asset-title {
                                     display: flex;
                                     align-items: center;
-                                    gap: 12px;
+                                    gap: 8px;
                                     flex: 1;
                                 }
                                 .asset-icon {
-                                    font-size: 20px;
-                                    padding: 8px;
-                                    background: white;
-                                    border-radius: 8px;
-                                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                                }
-                                .asset-info {
-                                    flex: 1;
+                                    font-size: 16px;
                                 }
                                 .asset-name {
-                                    font-size: 16px;
-                                    font-weight: 600;
+                                    font-size: 13px;
+                                    font-weight: 500;
                                     color: #1e293b;
-                                    margin: 0 0 4px 0;
                                 }
-                                .asset-type-badge {
-                                    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+                                .asset-type {
+                                    background: #3b82f6;
                                     color: white;
-                                    padding: 4px 12px;
-                                    border-radius: 20px;
-                                    font-size: 11px;
+                                    padding: 2px 6px;
+                                    border-radius: 10px;
+                                    font-size: 9px;
                                     font-weight: 600;
-                                    text-transform: uppercase;
-                                    letter-spacing: 0.5px;
                                 }
-                                .confidence-badge {
-                                    padding: 4px 10px;
-                                    border-radius: 16px;
-                                    font-size: 10px;
-                                    font-weight: 600;
-                                    text-transform: uppercase;
-                                }
-                                .confidence-high {
-                                    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+                                .match-reason {
+                                    background: #10b981;
                                     color: white;
-                                }
-                                .confidence-medium {
-                                    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-                                    color: white;
-                                }
-                                .expand-arrow {
-                                    font-size: 14px;
-                                    color: #64748b;
-                                    transition: transform 0.3s ease;
-                                    padding: 8px;
+                                    padding: 2px 6px;
+                                    border-radius: 8px;
+                                    font-size: 9px;
+                                    font-weight: 500;
                                 }
                                 .asset-details {
-                                    padding: 0;
-                                    max-height: 0;
-                                    overflow: hidden;
-                                    transition: all 0.4s ease;
+                                    display: none;
+                                    padding: 12px;
                                     background: #fafbfc;
                                 }
                                 .asset-details.show {
-                                    padding: 20px;
-                                    max-height: 1000px;
+                                    display: block;
                                 }
                                 .detail-grid {
                                     display: grid;
-                                    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-                                    gap: 15px;
+                                    grid-template-columns: 1fr 1fr;
+                                    gap: 8px;
+                                    font-size: 11px;
                                 }
                                 .detail-item {
+                                    padding: 6px;
                                     background: white;
-                                    padding: 12px;
-                                    border-radius: 8px;
+                                    border-radius: 4px;
                                     border: 1px solid #e2e8f0;
                                 }
                                 .detail-label {
                                     color: #64748b;
-                                    font-size: 11px;
+                                    font-size: 9px;
                                     font-weight: 600;
-                                    margin-bottom: 4px;
-                                    text-transform: uppercase;
+                                    margin-bottom: 2px;
                                 }
                                 .detail-value {
                                     color: #1e293b;
-                                    font-size: 13px;
                                     font-weight: 500;
                                     word-break: break-word;
                                 }
                                 .hudu-link {
-                                    display: inline-flex;
-                                    align-items: center;
-                                    gap: 8px;
-                                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                    display: inline-block;
+                                    background: #667eea;
                                     color: white;
                                     text-decoration: none;
-                                    padding: 10px 16px;
-                                    border-radius: 8px;
-                                    font-size: 12px;
+                                    padding: 6px 10px;
+                                    border-radius: 4px;
+                                    font-size: 10px;
                                     font-weight: 600;
-                                    transition: all 0.2s ease;
-                                    margin-top: 15px;
-                                }
-                                .hudu-link:hover {
-                                    transform: translateY(-2px);
-                                    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+                                    margin-top: 8px;
                                 }
                                 .no-assets {
                                     text-align: center;
-                                    padding: 40px 20px;
+                                    padding: 20px;
                                     color: #64748b;
                                     background: white;
-                                    border-radius: 12px;
-                                    border: 2px dashed #e2e8f0;
+                                    border-radius: 6px;
+                                    border: 1px dashed #cbd5e1;
                                 }
-                                .footer-section {
-                                    text-align: center;
-                                    padding: 20px;
-                                    background: #f8fafc;
-                                    border-top: 1px solid #e2e8f0;
+                                .expand-icon {
+                                    font-size: 12px;
+                                    color: #64748b;
+                                    transition: transform 0.2s;
                                 }
                             </style>
                             
-                            <!-- Customer Header -->
-                            <div class='customer-header'>
-                                <div class='customer-info'>
-                                    <h1 class='customer-name'>
-                                        <span>👤</span>
-                                        ${customerAsset.name}
-                                    </h1>
-                                    <div class='company-badge'>
-                                        ${customerAsset.company_name}
-                                    </div>
+                            <!-- Compact Header -->
+                            <div class='header'>
+                                <div class='customer-name'>
+                                    <span>👤 ${customerAsset.name}</span>
+                                    <span class='company-badge'>${customerAsset.company_name}</span>
                                 </div>
                             </div>
                             
-                            <div class='content-section'>
-                                <!-- Customer Details -->
-                                <div class='customer-details'>
-                                    <h2 class='section-title'>
-                                        <span>📋</span>
-                                        פרטי הלקוח
-                                    </h2>
-                                    <div class='field-grid'>
-                                        ${customerAsset.fields?.filter(f => f.value && f.value.toString().trim()).slice(0, 8).map(field => `
-                                            <div class='field-card'>
-                                                <div class='field-label'>${field.label || 'Field'}</div>
-                                                <div class='field-value'>${field.value || 'N/A'}</div>
+                            <div class='content'>
+                                <!-- Compact Customer Info -->
+                                <div class='customer-info'>
+                                    <div class='info-grid'>
+                                        ${customerAsset.fields?.filter(f => f.value && f.value.toString().trim()).slice(0, 4).map(field => `
+                                            <div class='info-item'>
+                                                <div class='info-label'>${field.label || 'Field'}</div>
+                                                <div class='info-value'>${field.value || 'N/A'}</div>
                                             </div>
-                                        `).join('') || '<div style="grid-column: 1 / -1; text-align: center; color: #64748b;">אין שדות זמינים</div>'}
+                                        `).join('') || '<div style="grid-column: 1 / -1; text-align: center; color: #64748b; font-size: 12px;">אין מידע נוסף</div>'}
                                     </div>
                                 </div>
                                 
-                                <!-- Related Assets -->
+                                <!-- Assets Section -->
                                 <div class='assets-section'>
-                                    <h2 class='section-title'>
-                                        <span>🔗</span>
-                                        נכסים קשורים (${relatedAssets.length})
-                                    </h2>
+                                    <h3>🔗 נכסים קשורים (${relatedAssets.length})</h3>
                                     
                                     ${relatedAssets.length > 0 ? relatedAssets.map(item => {
                                         let icon = '📄';
@@ -436,19 +377,19 @@ module.exports = async (req, res) => {
                                         else if (type.toLowerCase().includes('switch')) icon = '🔌';
                                         
                                         return `
-                                            <div class='asset-card'>
-                                                <div class='asset-header' onclick='toggleAssetDetails(this)'>
-                                                    <div class='asset-title-section'>
-                                                        <div class='asset-icon'>${icon}</div>
-                                                        <div class='asset-info'>
+                                            <div class='asset-item'>
+                                                <div class='asset-header' onclick='toggleDetails(this)'>
+                                                    <div class='asset-title'>
+                                                        <span class='asset-icon'>${icon}</span>
+                                                        <div>
                                                             <div class='asset-name'>${item.name || 'Unnamed Asset'}</div>
-                                                            <div style='display: flex; gap: 8px; align-items: center; margin-top: 4px;'>
-                                                                <span class='asset-type-badge'>${type}</span>
-                                                                <span class='confidence-badge confidence-${item.confidence || 'medium'}'>${item.match_reason}</span>
+                                                            <div style='display: flex; gap: 4px; margin-top: 2px;'>
+                                                                <span class='asset-type'>${type}</span>
+                                                                <span class='match-reason'>${item.match_reason}</span>
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    <div class='expand-arrow'>▼</div>
+                                                    <span class='expand-icon'>▼</span>
                                                 </div>
                                                 <div class='asset-details'>
                                                     <div class='detail-grid'>
@@ -472,42 +413,39 @@ module.exports = async (req, res) => {
                                                             <div class='detail-value'>${item.primary_mail}</div>
                                                         </div>
                                                         ` : ''}
-                                                        ${item.fields && item.fields.length > 0 ? item.fields.filter(f => f.value && f.value.toString().trim()).map(field => `
+                                                        ${item.fields?.filter(f => f.value && f.value.toString().trim()).slice(0, 6).map(field => `
                                                             <div class='detail-item'>
                                                                 <div class='detail-label'>${field.label || 'Field'}</div>
                                                                 <div class='detail-value'>${field.value}</div>
                                                             </div>
-                                                        `).join('') : ''}
+                                                        `).join('') || ''}
                                                     </div>
                                                     <a href='${item.url || '#'}' target='_blank' class='hudu-link'>
-                                                        <span>🔗</span>
-                                                        פתח ב-Hudu
+                                                        🔗 פתח ב-Hudu
                                                     </a>
                                                 </div>
                                             </div>
                                         `;
                                     }).join('') : `
                                         <div class='no-assets'>
-                                            <div style='font-size: 48px; margin-bottom: 16px;'>🔍</div>
-                                            <h3 style='color: #475569; margin: 0 0 8px 0;'>לא נמצאו נכסים קשורים</h3>
-                                            <p style='margin: 0; font-size: 14px;'>לא הצלחנו למצוא נכסים המקושרים ל-${customerAsset.name}</p>
+                                            <div style='font-size: 24px; margin-bottom: 8px;'>🔍</div>
+                                            <div style='font-size: 12px;'>לא נמצאו נכסים קשורים ל-${customerAsset.name}</div>
                                         </div>
                                     `}
                                 </div>
-                            </div>
-                            
-                            <!-- Footer -->
-                            <div class='footer-section'>
-                                <a href='${customerAsset.url}' target='_blank' class='hudu-link'>
-                                    <span>👤</span>
-                                    פתח פרופיל לקוח ב-Hudu
-                                </a>
+                                
+                                <!-- Footer -->
+                                <div style='text-align: center; margin-top: 15px;'>
+                                    <a href='${customerAsset.url}' target='_blank' class='hudu-link'>
+                                        👤 פתח פרופיל לקוח
+                                    </a>
+                                </div>
                             </div>
                             
                             <script>
-                                function toggleAssetDetails(header) {
+                                function toggleDetails(header) {
                                     const details = header.nextElementSibling;
-                                    const arrow = header.querySelector('.expand-arrow');
+                                    const arrow = header.querySelector('.expand-icon');
                                     
                                     if (details.classList.contains('show')) {
                                         details.classList.remove('show');
@@ -557,7 +495,7 @@ module.exports = async (req, res) => {
     } 
     else if (req.method === 'GET') {
         const testResponse = {
-            "message": "<div style='padding: 15px; background: #28a745; color: white; border-radius: 8px; text-align: center;'><h3>✅ BoldDesk-Hudu Integration Active</h3><p>Smart & Beautiful version. Updated: " + new Date().toLocaleString() + "</p></div>",
+            "message": "<div style='padding: 15px; background: #28a745; color: white; border-radius: 8px; text-align: center;'><h3>✅ BoldDesk-Hudu Integration Active</h3><p>Compact & Smart version. Updated: " + new Date().toLocaleString() + "</p></div>",
             "statusCode": "200"
         };
         res.status(200).json(testResponse);
