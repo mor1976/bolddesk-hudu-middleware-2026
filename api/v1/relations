@@ -232,7 +232,7 @@ module.exports = async (req, res) => {
                             groupedRelated[type].push(item);
                         });
                         
-                        // Create HTML
+                        // Create HTML with detailed logging in the result
                         htmlMessage = `
                             <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 13px;'>
                                 <style>
@@ -331,6 +331,14 @@ module.exports = async (req, res) => {
                                         flex: 1;
                                         word-break: break-word;
                                     }
+                                    .debug-section {
+                                        background: #fff3cd;
+                                        border: 1px solid #ffeaa7;
+                                        border-radius: 4px;
+                                        padding: 10px;
+                                        margin: 10px 0;
+                                        font-size: 11px;
+                                    }
                                 </style>
                                 
                                 <!-- Header -->
@@ -343,6 +351,21 @@ module.exports = async (req, res) => {
                                             ${customerAsset.company_name}
                                         </div>
                                     </div>
+                                </div>
+                                
+                                <!-- Search Debug Info -->
+                                <div class='debug-section'>
+                                    <strong>🔍 Search Details:</strong><br>
+                                    • Customer: "${customerAsset.name}"<br>
+                                    • Search terms: firstName="${firstName}", lastName="${lastName}"<br>
+                                    • Total assets in company: ${allCompanyAssets.length}<br>
+                                    • Assets checked: ${allCompanyAssets.filter(a => a.id !== customerAsset.id).length}<br>
+                                    • Assets found: ${relatedAssets.length}<br><br>
+                                    
+                                    <strong>All company assets:</strong><br>
+                                    ${allCompanyAssets.map((asset, index) => 
+                                        `${index + 1}. ${asset.name} (${asset.asset_type}) ${asset.id === customerAsset.id ? '[CUSTOMER]' : ''}`
+                                    ).join('<br>')}
                                 </div>
                                 
                                 <!-- Customer Details -->
@@ -433,7 +456,7 @@ module.exports = async (req, res) => {
                                 <div class='detail-section' style='text-align: center;'>
                                     <p style='color: #586069; font-size: 12px; margin: 0;'>
                                         🔍 לא נמצאו נכסים קשורים ל-${customerAsset.name}<br>
-                                        <small>חיפשנו בכל נכסי החברה אבל לא מצאנו קשרים</small>
+                                        <small>חיפשנו ב-${allCompanyAssets.length} נכסים בחברה</small>
                                     </p>
                                 </div>
                                 `}
