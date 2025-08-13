@@ -47,24 +47,45 @@ module.exports = async (req, res) => {
                     
                     console.log('Found customer:', customerAsset.name, 'ID:', customerAsset.id);
                     
-                    // 2. Use Relations API to find related assets
+                    // 2. Use Relations API with POST to find related assets
                     let relatedAssets = [];
                     
                     try {
                         console.log('Fetching relations for customer asset ID:', customerAsset.id);
                         
-                        // Get all relations for this customer asset
-                        const relationsResponse = await axios.get(`${HUDU_BASE_URL}/api/v1/relations`, {
-                            headers: { 'x-api-key': HUDU_API_KEY, 'Content-Type': 'application/json' },
-                            params: {
-                                object_id: customerAsset.id,
-                                object_type: 'Asset'
+                        // POST to relations endpoint to get related items
+                        const relationsResponse = await axios.post(`${HUDU_BASE_URL}/api/v1/relations`, {
+                            object_id: customerAsset.id,
+                            object_type: 'Asset'
+                        }, {
+                            headers: { 
+                                'x-api-key': HUDU_API_KEY, 
+                                'Content-Type': 'application/json' 
                             }
                         });
                         
                         const relations = relationsResponse.data?.relations || [];
                         console.log(`Found ${relations.length} relations for customer`);
-                        console.log('Relations data:', JSON.stringify(relations, null, 2));
+                        console.log('Relations response:', JSON.stringify(relationsResponse.data, null, 2));
+                        
+                        // If POST doesn't work, try GET
+                        if (relations.length === 0) {
+                            console.log('POST returned no results, trying GET method...');
+                            
+                            const getRelationsResponse = await axios.get(`${HUDU_BASE_URL}/api/v1/relations`, {
+                                headers: { 'x-api-key': HUDU_API_KEY, 'Content-Type': 'application/json' },
+                                params: {
+                                    object_id: customerAsset.id,
+                                    object_type: 'Asset'
+                                }
+                            });
+                            
+                            const getRelations = getRelationsResponse.data?.relations || [];
+                            console.log(`GET method found ${getRelations.length} relations`);
+                            console.log('GET Relations response:', JSON.stringify(getRelationsResponse.data, null, 2));
+                            
+                            relations.push(...getRelations);
+                        }
                         
                         // Process each relation to get the related asset details
                         for (const relation of relations) {
@@ -120,6 +141,12 @@ module.exports = async (req, res) => {
                     } catch (relationsError) {
                         console.error('Relations API error:', relationsError.message);
                         console.log('Relations API might not be available or asset has no relations');
+                        
+                        // If relations API fails completely, try alternative approach
+                        console.log('Trying alternative: check if asset has related_items field...');
+                        if (customerAsset.related_items) {
+                            console.log('Found related_items field:', customerAsset.related_items);
+                        }
                     }
                     
                     // 3. Create beautiful compact HTML
