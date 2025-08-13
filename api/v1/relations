@@ -89,6 +89,7 @@ module.exports = async (req, res) => {
                             
                             const relations = relationsResponse.data?.relations || [];
                             console.log(`Found ${relations.length} relations`);
+                            console.log('Relations data:', JSON.stringify(relations, null, 2));
                             
                             // Get details for each related asset
                             for (const relation of relations) {
@@ -125,6 +126,9 @@ module.exports = async (req, res) => {
                                             relatedAsset.relation_description = relation.description || 'Connected';
                                             relatedAssets.push(relatedAsset);
                                             console.log(`Added related asset: ${relatedAsset.name} (${relatedAsset.asset_type})`);
+                                            console.log('Asset fields:', JSON.stringify(relatedAsset.fields, null, 2));
+                                        } else {
+                                            console.log('No asset data in response:', assetResponse.data);
                                         }
                                     }
                                 } catch (assetError) {
@@ -187,6 +191,9 @@ module.exports = async (req, res) => {
                             }
                             groupedRelated[type].push(item);
                         });
+                        
+                        console.log('Grouped related assets:', JSON.stringify(groupedRelated, null, 2));
+                        console.log('Total related assets for display:', relatedAssets.length);
                         
                         // Create HTML
                         htmlMessage = `
@@ -330,8 +337,10 @@ module.exports = async (req, res) => {
                                     <h4 style='margin: 0 0 10px 0; color: #24292e; font-size: 14px;'>
                                         🔗 נכסים של ${customerAsset.name.split(' ')[0]} (${relatedAssets.length})
                                     </h4>
-                                    ${Object.entries(groupedRelated).map(([type, items]) => {
+                                    <!-- Force display all related assets for debugging -->
+                                    ${relatedAssets.map(item => {
                                         let icon = '📄';
+                                        const type = item.asset_type || 'Other';
                                         if (type.toLowerCase().includes('phone')) icon = '📱';
                                         else if (type.toLowerCase().includes('computer')) icon = '💻';
                                         else if (type.toLowerCase().includes('laptop')) icon = '💻';
@@ -341,8 +350,9 @@ module.exports = async (req, res) => {
                                         else if (type.toLowerCase().includes('network')) icon = '🔌';
                                         else if (type.toLowerCase().includes('email')) icon = '📧';
                                         else if (type.toLowerCase().includes('sharepoint')) icon = '📊';
+                                        else if (type.toLowerCase().includes('switch')) icon = '🔌';
                                         
-                                        return items.map(item => `
+                                        return `
                                             <div class='related-item'>
                                                 <div class='related-header' onclick='toggleRelated(this)'>
                                                     <div class='related-title'>
@@ -376,16 +386,13 @@ module.exports = async (req, res) => {
                                                     </div>
                                                     ` : ''}
                                                     <!-- Custom Fields -->
-                                                    ${item.fields?.filter(f => f.value && f.value.toString().trim()).map(field => `
+                                                    ${item.fields && item.fields.length > 0 ? item.fields.map(field => `
                                                         <div class='detail-row'>
                                                             <span class='detail-label'>${field.label || 'Field'}:</span>
-                                                            <span class='detail-value'>${field.value}</span>
+                                                            <span class='detail-value'>${field.value || 'Empty'}</span>
                                                         </div>
-                                                    `).join('') || ''}
-                                                    <!-- If no fields, show a message -->
-                                                    ${(!item.fields || item.fields.filter(f => f.value && f.value.toString().trim()).length === 0) ? 
-                                                        '<div style="color: #666; font-style: italic; padding: 10px 0;">No additional details available for this asset</div>' 
-                                                        : ''}
+                                                    `).join('') : '<div style="color: #666; font-style: italic; padding: 10px 0;">No custom fields found</div>'}
+                                                    
                                                     <div style='margin-top: 10px; padding-top: 10px; border-top: 1px solid #e1e4e8;'>
                                                         <a href='${item.url || '#'}' target='_blank' style='color: #0969da; text-decoration: none; font-size: 11px;'>
                                                             🔗 פתח ב-Hudu →
@@ -393,7 +400,7 @@ module.exports = async (req, res) => {
                                                     </div>
                                                 </div>
                                             </div>
-                                        `).join('');
+                                        `;
                                     }).join('')}
                                 </div>
                                 ` : `
