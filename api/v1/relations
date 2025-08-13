@@ -1,562 +1,75 @@
-// api/index.js - Search for assets using company search and better filtering
+// Simple test version - just shows what assets are found
 const axios = require('axios');
 
-// Environment variables
 const HUDU_API_KEY = process.env.HUDU_API_KEY;
 const HUDU_BASE_URL = process.env.HUDU_BASE_URL;
 
 module.exports = async (req, res) => {
-    console.log(`${req.method} request received`);
-    
-    // Handle POST requests from BoldDesk
     if (req.method === 'POST') {
         try {
-            console.log('POST body:', JSON.stringify(req.body, null, 2));
+            let email = req.body.requester?.EmailId || req.body.requester?.email || req.body.EmailId || req.body.email;
             
-            // Extract email from the payload
-            let email = null;
-            if (req.body) {
-                email = req.body.requester?.EmailId ||
-                       req.body.requester?.email ||
-                       req.body.customer?.EmailId ||
-                       req.body.customer?.email ||
-                       req.body.EmailId ||
-                       req.body.email ||
-                       null;
-            }
-            
-            console.log('Email found:', email);
-            
-            let htmlMessage = '';
-            
-            // If we have an email and Hudu credentials
             if (email && HUDU_API_KEY && HUDU_BASE_URL) {
-                try {
-                    // 1. Find the customer by email
-                    const searchResponse = await axios.get(
-                        `${HUDU_BASE_URL}/api/v1/assets`,
-                        {
-                            headers: {
-                                'x-api-key': HUDU_API_KEY,
-                                'Content-Type': 'application/json'
-                            },
-                            params: { 
-                                search: email,
-                                page_size: 25
-                            }
-                        }
-                    );
+                // 1. Find customer
+                const searchResponse = await axios.get(`${HUDU_BASE_URL}/api/v1/assets`, {
+                    headers: { 'x-api-key': HUDU_API_KEY, 'Content-Type': 'application/json' },
+                    params: { search: email, page_size: 25 }
+                });
+                
+                const customerAsset = searchResponse.data?.assets?.find(asset => 
+                    asset.asset_type?.toLowerCase().includes('people') ||
+                    asset.fields?.some(f => f.value?.includes(email))
+                );
+                
+                if (customerAsset) {
+                    // 2. Get ALL assets in company
+                    const companyResponse = await axios.get(`${HUDU_BASE_URL}/api/v1/companies/${customerAsset.company_id}/assets`, {
+                        headers: { 'x-api-key': HUDU_API_KEY, 'Content-Type': 'application/json' },
+                        params: { page_size: 200 }
+                    });
                     
-                    const allAssets = searchResponse.data?.assets || [];
-                    const customerAsset = allAssets.find(asset => 
-                        asset.asset_type?.toLowerCase().includes('people') ||
-                        asset.asset_type?.toLowerCase().includes('person') ||
-                        asset.asset_type?.toLowerCase().includes('contact') ||
-                        asset.fields?.some(f => f.value?.includes(email))
-                    );
+                    const allAssets = companyResponse.data?.assets || [];
                     
-                    if (!customerAsset) {
-                        htmlMessage = `
-                            <div style='border: 1px solid #ffc107; border-radius: 8px; padding: 15px; background: #fffef5;'>
-                                <h4 style='color: #ff9800; margin: 0 0 10px 0;'>⚠️ Customer Not Found</h4>
-                                <p style='color: #666;'>Email: ${email}</p>
-                            </div>
-                        `;
-                    } else {
-                        console.log('Found customer:', customerAsset.name, 'ID:', customerAsset.id);
-                        console.log('Company ID:', customerAsset.company_id);
-                        
-                        let relatedAssets = [];
-                        
-                        // 2. Get ALL assets in the same company
-                        if (customerAsset.company_id) {
-                            try {
-                                console.log('Fetching all assets in company:', customerAsset.company_id);
-                                
-                                // Get all assets in the company with multiple pages if needed
-                                let allCompanyAssets = [];
-                                let page = 1;
-                                let hasMorePages = true;
-                                
-                                while (hasMorePages && page <= 5) { // Limit to 5 pages to avoid infinite loop
-                                    const companyAssetsResponse = await axios.get(
-                                        `${HUDU_BASE_URL}/api/v1/companies/${customerAsset.company_id}/assets`,
-                                        {
-                                            headers: {
-                                                'x-api-key': HUDU_API_KEY,
-                                                'Content-Type': 'application/json'
-                                            },
-                                            params: {
-                                                page: page,
-                                                page_size: 100
-                                            }
-                                        }
-                                    );
-                                    
-                                    const pageAssets = companyAssetsResponse.data?.assets || [];
-                                    allCompanyAssets = allCompanyAssets.concat(pageAssets);
-                                    
-                                    console.log(`Page ${page}: Found ${pageAssets.length} assets`);
-                                    
-                                    // Check if there are more pages
-                                    hasMorePages = pageAssets.length === 100;
-                                    page++;
-                                }
-                                
-                                console.log(`Total assets in company: ${allCompanyAssets.length}`);
-                                
-                                // Filter out the customer asset itself and find related assets
-                                const customerName = customerAsset.name.toLowerCase().trim();
-                                const nameParts = customerName.split(/\s+/);
-                                const firstName = nameParts[0];
-                                const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
-                                
-                                console.log('Looking for assets related to:', { customerName, firstName, lastName });
-                                console.log('All company assets:');
-                                allCompanyAssets.forEach((asset, index) => {
-                                    console.log(`${index + 1}. "${asset.name}" (Type: ${asset.asset_type}) [ID: ${asset.id}]`);
-                                    if (asset.name && asset.name.toLowerCase().includes('mizra')) {
-                                        console.log(`   *** MIZRA ASSET FOUND: ${asset.name} ***`);
-                                    }
-                                });
-                                
-                                // More comprehensive search logic
-                                relatedAssets = allCompanyAssets.filter(asset => {
-                                    // Skip the customer asset itself
-                                    if (asset.id === customerAsset.id) {
-                                        return false;
-                                    }
-                                    
-                                    const assetName = (asset.name || '').toLowerCase();
-                                    console.log(`\nChecking asset: "${asset.name}" (Type: ${asset.asset_type})`);
-                                    console.log(`Asset name lowercase: "${assetName}"`);
-                                    console.log(`Looking for: firstName="${firstName}", lastName="${lastName}", fullName="${customerName}"`);
-                                    
-                                    // Method 1: Name contains customer name parts
-                                    const hasFirstName = firstName && assetName.includes(firstName);
-                                    const hasLastName = lastName && assetName.includes(lastName);
-                                    const hasFullName = assetName.includes(customerName);
-                                    
-                                    console.log(`Name checks: firstName=${hasFirstName}, lastName=${hasLastName}, fullName=${hasFullName}`);
-                                    
-                                    if (hasFirstName || hasLastName || hasFullName) {
-                                        console.log(`✓ Found by name match: ${asset.name}`);
-                                        asset.match_reason = 'Name match';
-                                        return true;
-                                    }
-                                    
-                                    // Method 2: Check asset fields for customer references
-                                    if (asset.fields && asset.fields.length > 0) {
-                                        for (const field of asset.fields) {
-                                            const fieldValue = (field.value || '').toString().toLowerCase();
-                                            const fieldLabel = (field.label || '').toLowerCase();
-                                            
-                                            // Check if field value contains customer name
-                                            if (fieldValue.includes(firstName) || 
-                                                (lastName && fieldValue.includes(lastName)) ||
-                                                fieldValue.includes(customerName)) {
-                                                console.log(`✓ Found by field "${field.label}": ${asset.name}`);
-                                                asset.match_reason = `Field: ${field.label}`;
-                                                return true;
-                                            }
-                                            
-                                            // Check for "assigned to" or "owner" type fields
-                                            if ((fieldLabel.includes('owner') || 
-                                                 fieldLabel.includes('user') || 
-                                                 fieldLabel.includes('assigned') ||
-                                                 fieldLabel.includes('person') ||
-                                                 fieldLabel.includes('contact') ||
-                                                 fieldLabel.includes('שם') ||
-                                                 fieldLabel.includes('בעלים')) &&
-                                                (fieldValue.includes(firstName) || 
-                                                 (lastName && fieldValue.includes(lastName)))) {
-                                                console.log(`✓ Found by owner field "${field.label}": ${asset.name}`);
-                                                asset.match_reason = `Owner field: ${field.label}`;
-                                                return true;
-                                            }
-                                        }
-                                    }
-                                    
-                                    // Method 3: For some asset types, check if they might belong to the customer's area
-                                    // This is more speculative but can catch assets named by location or pattern
-                                    const assetType = (asset.asset_type || '').toLowerCase();
-                                    console.log(`Asset type: "${assetType}"`);
-                                    
-                                    if (assetType.includes('network') || assetType.includes('switch') || 
-                                        assetType.includes('phone') || assetType.includes('computer')) {
-                                        
-                                        console.log('This is a potential infrastructure asset, checking location hints...');
-                                        
-                                        // Check if asset name contains location hints from customer name
-                                        // E.g., if customer is "Friend Mizra", look for "Mizra" in asset names
-                                        for (const part of nameParts) {
-                                            console.log(`Checking if asset name "${assetName}" contains part "${part}"`);
-                                            if (part.length > 3 && assetName.includes(part.toLowerCase())) {
-                                                console.log(`✓ Found by location match "${part}": ${asset.name}`);
-                                                asset.match_reason = `Location: ${part}`;
-                                                return true;
-                                            }
-                                        }
-                                        
-                                        // Special case: check for "mizra" specifically in switch names
-                                        if (assetName.includes('mizra')) {
-                                            console.log(`✓ Found by specific "mizra" match: ${asset.name}`);
-                                            asset.match_reason = 'Mizra location match';
-                                            return true;
-                                        }
-                                    }
-                                    
-                                    return false;
-                                });
-                                
-                                console.log(`Found ${relatedAssets.length} related assets after filtering`);
-                                
-                                // Log what we found
-                                relatedAssets.forEach(asset => {
-                                    console.log(`- ${asset.name} (${asset.asset_type}) - ${asset.match_reason}`);
-                                });
-                                
-                            } catch (companyError) {
-                                console.log('Error fetching company assets:', companyError.message);
-                                relatedAssets = [];
-                            }
-                        }
-                        
-                        // Group related assets by type
-                        const groupedRelated = {};
-                        relatedAssets.forEach(item => {
-                            const type = item.asset_type || 'Other';
-                            if (!groupedRelated[type]) {
-                                groupedRelated[type] = [];
-                            }
-                            groupedRelated[type].push(item);
-                        });
-                        
-                        // Create HTML with detailed logging in the result
-                        htmlMessage = `
-                            <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 13px;'>
-                                <style>
-                                    .detail-section {
-                                        margin: 15px 0;
-                                        padding: 12px;
-                                        background: #f6f8fa;
-                                        border-radius: 6px;
-                                    }
-                                    .field-grid {
-                                        display: grid;
-                                        grid-template-columns: 1fr 1fr;
-                                        gap: 10px;
-                                        margin: 10px 0;
-                                    }
-                                    .field-item {
-                                        padding: 8px;
-                                        background: white;
-                                        border-radius: 4px;
-                                        border: 1px solid #e1e4e8;
-                                    }
-                                    .field-label {
-                                        color: #586069;
-                                        font-size: 11px;
-                                        margin-bottom: 2px;
-                                        font-weight: 500;
-                                    }
-                                    .field-value {
-                                        color: #24292e;
-                                        font-weight: 500;
-                                        font-size: 13px;
-                                        word-break: break-word;
-                                    }
-                                    .related-item {
-                                        background: white;
-                                        border: 1px solid #e1e4e8;
-                                        border-radius: 6px;
-                                        margin: 8px 0;
-                                        overflow: hidden;
-                                    }
-                                    .related-header {
-                                        background: #f6f8fa;
-                                        padding: 10px 12px;
-                                        border-bottom: 1px solid #e1e4e8;
-                                        cursor: pointer;
-                                        display: flex;
-                                        justify-content: space-between;
-                                        align-items: center;
-                                    }
-                                    .related-header:hover {
-                                        background: #f0f2f5;
-                                    }
-                                    .related-title {
-                                        font-weight: 500;
-                                        color: #24292e;
-                                        display: flex;
-                                        align-items: center;
-                                        gap: 8px;
-                                        flex: 1;
-                                    }
-                                    .related-type {
-                                        background: #e3f2fd;
-                                        color: #0969da;
-                                        padding: 2px 6px;
-                                        border-radius: 3px;
-                                        font-size: 10px;
-                                        font-weight: 600;
-                                    }
-                                    .match-badge {
-                                        background: #e8f5e8;
-                                        color: #28a745;
-                                        padding: 2px 6px;
-                                        border-radius: 3px;
-                                        font-size: 9px;
-                                        margin-left: 5px;
-                                    }
-                                    .related-details {
-                                        display: none;
-                                        padding: 12px;
-                                    }
-                                    .related-details.show {
-                                        display: block;
-                                    }
-                                    .detail-row {
-                                        display: flex;
-                                        padding: 5px 0;
-                                        font-size: 12px;
-                                    }
-                                    .detail-label {
-                                        color: #586069;
-                                        min-width: 120px;
-                                        font-weight: 500;
-                                    }
-                                    .detail-value {
-                                        color: #24292e;
-                                        flex: 1;
-                                        word-break: break-word;
-                                    }
-                                    .debug-section {
-                                        background: #fff3cd;
-                                        border: 1px solid #ffeaa7;
-                                        border-radius: 4px;
-                                        padding: 10px;
-                                        margin: 10px 0;
-                                        font-size: 11px;
-                                    }
-                                </style>
-                                
-                                <!-- Header -->
-                                <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 15px; border-radius: 8px 8px 0 0; margin: -10px -10px 0 -10px;'>
-                                    <div style='display: flex; justify-content: space-between; align-items: center;'>
-                                        <div style='font-weight: 600; font-size: 14px;'>
-                                            ✅ ${customerAsset.name}
-                                        </div>
-                                        <div style='background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 12px; font-size: 11px;'>
-                                            ${customerAsset.company_name}
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Search Debug Info -->
-                                <div class='debug-section'>
-                                    <strong>🔍 Search Details:</strong><br>
-                                    • Customer: "${customerAsset.name}"<br>
-                                    • Search terms: firstName="${firstName}", lastName="${lastName}"<br>
-                                    • Total assets in company: ${allCompanyAssets.length}<br>
-                                    • Assets checked: ${allCompanyAssets.filter(a => a.id !== customerAsset.id).length}<br>
-                                    • Assets found: ${relatedAssets.length}<br><br>
-                                    
-                                    <strong>All company assets:</strong><br>
-                                    ${allCompanyAssets.map((asset, index) => 
-                                        `${index + 1}. ${asset.name} (${asset.asset_type}) ${asset.id === customerAsset.id ? '[CUSTOMER]' : ''}`
-                                    ).join('<br>')}
-                                </div>
-                                
-                                <!-- Customer Details -->
-                                <div class='detail-section'>
-                                    <h4 style='margin: 0 0 10px 0; color: #24292e; font-size: 14px;'>👤 פרטי לקוח</h4>
-                                    <div class='field-grid'>
-                                        ${customerAsset.fields?.filter(f => f.value && f.value.toString().trim()).slice(0, 8).map(field => `
-                                            <div class='field-item'>
-                                                <div class='field-label'>${field.label || 'Field'}</div>
-                                                <div class='field-value'>${field.value || 'N/A'}</div>
-                                            </div>
-                                        `).join('') || '<div style="grid-column: 1 / -1; text-align: center; color: #666;">No fields available</div>'}
-                                    </div>
-                                </div>
-                                
-                                <!-- Related Assets -->
-                                ${relatedAssets.length > 0 ? `
-                                <div class='detail-section'>
-                                    <h4 style='margin: 0 0 10px 0; color: #24292e; font-size: 14px;'>
-                                        🔗 נכסים של ${customerAsset.name.split(' ')[0]} (${relatedAssets.length})
-                                    </h4>
-                                    ${relatedAssets.map(item => {
-                                        let icon = '📄';
-                                        const type = item.asset_type || 'Other';
-                                        if (type.toLowerCase().includes('phone')) icon = '📱';
-                                        else if (type.toLowerCase().includes('computer')) icon = '💻';
-                                        else if (type.toLowerCase().includes('laptop')) icon = '💻';
-                                        else if (type.toLowerCase().includes('password')) icon = '🔐';
-                                        else if (type.toLowerCase().includes('license')) icon = '🔑';
-                                        else if (type.toLowerCase().includes('printer')) icon = '🖨️';
-                                        else if (type.toLowerCase().includes('network')) icon = '🔌';
-                                        else if (type.toLowerCase().includes('email')) icon = '📧';
-                                        else if (type.toLowerCase().includes('sharepoint')) icon = '📊';
-                                        else if (type.toLowerCase().includes('switch')) icon = '🔌';
-                                        
-                                        return `
-                                            <div class='related-item'>
-                                                <div class='related-header' onclick='toggleRelated(this)'>
-                                                    <div class='related-title'>
-                                                        <span>${icon}</span>
-                                                        <span>${item.name || 'Unnamed Asset'}</span>
-                                                        <span class='related-type'>${type}</span>
-                                                        ${item.match_reason ? `<span class='match-badge'>${item.match_reason}</span>` : ''}
-                                                    </div>
-                                                    <span style='color: #586069; font-size: 12px; transition: transform 0.2s;'>▼</span>
-                                                </div>
-                                                <div class='related-details'>
-                                                    <!-- Basic Asset Info -->
-                                                    <div class='detail-row'>
-                                                        <span class='detail-label'>Asset ID:</span>
-                                                        <span class='detail-value'>${item.id || 'N/A'}</span>
-                                                    </div>
-                                                    <div class='detail-row'>
-                                                        <span class='detail-label'>Asset Type:</span>
-                                                        <span class='detail-value'>${item.asset_type || 'N/A'}</span>
-                                                    </div>
-                                                    ${item.primary_serial ? `
-                                                    <div class='detail-row'>
-                                                        <span class='detail-label'>Serial Number:</span>
-                                                        <span class='detail-value'>${item.primary_serial}</span>
-                                                    </div>
-                                                    ` : ''}
-                                                    ${item.primary_mail ? `
-                                                    <div class='detail-row'>
-                                                        <span class='detail-label'>Email:</span>
-                                                        <span class='detail-value'>${item.primary_mail}</span>
-                                                    </div>
-                                                    ` : ''}
-                                                    <!-- Custom Fields -->
-                                                    ${item.fields && item.fields.length > 0 ? item.fields.map(field => `
-                                                        <div class='detail-row'>
-                                                            <span class='detail-label'>${field.label || 'Field'}:</span>
-                                                            <span class='detail-value'>${field.value || 'Empty'}</span>
-                                                        </div>
-                                                    `).join('') : '<div style="color: #666; font-style: italic; padding: 10px 0;">No custom fields found</div>'}
-                                                    
-                                                    <div style='margin-top: 10px; padding-top: 10px; border-top: 1px solid #e1e4e8;'>
-                                                        <a href='${item.url || '#'}' target='_blank' style='color: #0969da; text-decoration: none; font-size: 11px;'>
-                                                            🔗 פתח ב-Hudu →
-                                                        </a>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        `;
-                                    }).join('')}
-                                </div>
-                                ` : `
-                                <div class='detail-section' style='text-align: center;'>
-                                    <p style='color: #586069; font-size: 12px; margin: 0;'>
-                                        🔍 לא נמצאו נכסים קשורים ל-${customerAsset.name}<br>
-                                        <small>חיפשנו ב-${allCompanyAssets.length} נכסים בחברה</small>
-                                    </p>
-                                </div>
-                                `}
-                                
-                                <!-- Debug Info -->
-                                <div style='background: #f0f8ff; padding: 8px; margin: 10px 0; border-radius: 4px; font-size: 11px; color: #666; border-left: 3px solid #0969da;'>
-                                    <strong>🔍 Debug Info:</strong><br>
-                                    • Customer: "${customerAsset.name}" (ID: ${customerAsset.id})<br>
-                                    • Company: ${customerAsset.company_name} (ID: ${customerAsset.company_id})<br>
-                                    • Customer Asset Type: ${customerAsset.asset_type}<br>
-                                    • Found ${relatedAssets.length} related assets<br>
-                                    ${relatedAssets.length > 0 ? 
-                                        '• Assets found:<br>' + relatedAssets.map(a => `&nbsp;&nbsp;- ${a.name} (${a.asset_type}) - Matched by: ${a.match_reason}`).join('<br>') 
-                                        : '• No related assets found in company search'}<br>
-                                    • Customer fields count: ${customerAsset.fields?.length || 0}<br>
-                                    • Customer primary_serial: ${customerAsset.primary_serial || 'N/A'}<br>
-                                    • Customer URL: ${customerAsset.url || 'N/A'}
-                                </div>
-                                
-                                <!-- Footer -->
-                                <div style='background: #f6f8fa; padding: 12px; border: 1px solid #e1e4e8; border-radius: 0 0 8px 8px; text-align: center;'>
-                                    <a href='${customerAsset.url}' target='_blank' style='display: inline-block; padding: 8px 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; text-decoration: none; border-radius: 6px; font-weight: 500; font-size: 12px;'>
-                                        🔍 View Full Details in Hudu
-                                    </a>
-                                </div>
-                                
-                                <script>
-                                    function toggleRelated(header) {
-                                        const details = header.nextElementSibling;
-                                        const arrow = header.querySelector('span:last-child');
-                                        
-                                        if (details.classList.contains('show')) {
-                                            details.classList.remove('show');
-                                            arrow.style.transform = 'rotate(0deg)';
-                                        } else {
-                                            // Close all other open items
-                                            document.querySelectorAll('.related-details.show').forEach(d => {
-                                                d.classList.remove('show');
-                                            });
-                                            document.querySelectorAll('.related-header span:last-child').forEach(a => {
-                                                a.style.transform = 'rotate(0deg)';
-                                            });
-                                            
-                                            // Open this item
-                                            details.classList.add('show');
-                                            arrow.style.transform = 'rotate(180deg)';
-                                        }
-                                    }
-                                </script>
-                            </div>
-                        `;
-                    }
-                } catch (huduError) {
-                    console.error('Hudu API error:', huduError.message);
-                    htmlMessage = `
-                        <div style='border: 1px solid #dc3545; border-radius: 8px; padding: 15px; background: #fff5f5;'>
-                            <h4 style='color: #dc3545; margin: 0 0 10px 0;'>❌ Hudu Connection Error</h4>
-                            <p style='color: #666; font-size: 12px;'>${huduError.message}</p>
+                    // 3. Simple message showing everything
+                    const htmlMessage = `
+                        <div style='padding: 15px; font-family: Arial; font-size: 12px;'>
+                            <h3>🔍 Debug: כל הנכסים בחברה</h3>
+                            
+                            <p><strong>לקוח:</strong> ${customerAsset.name}</p>
+                            <p><strong>חברה:</strong> ${customerAsset.company_name}</p>
+                            <p><strong>סה"כ נכסים:</strong> ${allAssets.length}</p>
+                            
+                            <h4>רשימת כל הנכסים:</h4>
+                            <ul>
+                                ${allAssets.map(asset => 
+                                    `<li>${asset.name} (${asset.asset_type}) ${asset.id === customerAsset.id ? '<strong>[הלקוח]</strong>' : ''}</li>`
+                                ).join('')}
+                            </ul>
+                            
+                            <p style='color: red;'><strong>השאלה:</strong> למה רק אחד מופיע ב-Related Items?</p>
                         </div>
                     `;
+                    
+                    res.status(200).json({ "message": htmlMessage, "statusCode": "200" });
+                    return;
                 }
-            } else {
-                htmlMessage = `
-                    <div style='border: 1px solid #6c757d; border-radius: 8px; padding: 15px; background: #f8f9fa;'>
-                        <h4 style='color: #6c757d; margin: 0 0 10px 0;'>ℹ️ Configuration Issue</h4>
-                        <p style='color: #666; font-size: 12px;'>Email or Hudu credentials not found.</p>
-                    </div>
-                `;
             }
             
-            // Return response in BoldDesk format
-            const response = {
-                "message": htmlMessage,
-                "statusCode": "200"
-            };
-            
-            console.log('Sending response to BoldDesk');
-            res.status(200).json(response);
+            res.status(200).json({ 
+                "message": "<div>לא נמצא לקוח או חסרים credentials</div>", 
+                "statusCode": "200" 
+            });
             
         } catch (error) {
-            console.error('Error:', error);
-            
-            const errorResponse = {
-                "message": `<div style='color: red;'>Error: ${error.message}</div>`,
-                "statusCode": "500"
-            };
-            
-            res.status(200).json(errorResponse);
+            res.status(200).json({ 
+                "message": `<div>שגיאה: ${error.message}</div>`, 
+                "statusCode": "500" 
+            });
         }
-    } 
-    // Handle GET requests
-    else if (req.method === 'GET') {
-        const testResponse = {
-            "message": "<div style='padding: 15px; background: #28a745; color: white; border-radius: 8px; text-align: center;'><h3>✅ BoldDesk-Hudu Integration Active</h3><p>Company-wide search version.</p></div>",
-            "statusCode": "200"
-        };
-        
-        res.status(200).json(testResponse);
-    } 
-    else {
-        res.status(405).json({ error: 'Method not allowed' });
+    } else {
+        res.status(200).json({ 
+            "message": "<div>Simple Debug Test Active</div>", 
+            "statusCode": "200" 
+        });
     }
 };
