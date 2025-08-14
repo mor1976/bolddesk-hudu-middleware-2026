@@ -1,163 +1,41 @@
-// Debug Version - Hudu-BoldDesk Integration
+// Fixed Final Version - Hudu-BoldDesk Integration
 const axios = require('axios');
 
 const HUDU_API_KEY = process.env.HUDU_API_KEY;
 const HUDU_BASE_URL = process.env.HUDU_BASE_URL;
 
+// Helper function to normalize text for comparison
+function normalizeText(text) {
+    if (!text) return '';
+    return text.toString().toLowerCase().trim()
+        .replace(/[\s\-\_\.]+/g, ' ')  // Replace multiple spaces, dashes, underscores with single space
+        .replace(/[^\u0590-\u05FF\w\s]/g, ''); // Keep Hebrew, English letters and spaces
+}
+
 module.exports = async (req, res) => {
     console.log(`${req.method} request received`);
     
-    // Debug endpoint - check asset structure
-    if (req.method === 'GET' && req.query.debug_asset) {
-        try {
-            const assetId = req.query.debug_asset;
-            
-            // Get asset with all details
-            const response = await axios.get(`${HUDU_BASE_URL}/api/v1/assets/${assetId}`, {
-                headers: { 'x-api-key': HUDU_API_KEY }
-            });
-            
-            const asset = response.data?.asset;
-            
-            // Check for relations in different possible locations
-            const debugInfo = {
-                asset_id: asset?.id,
-                asset_name: asset?.name,
-                asset_type: asset?.asset_type,
-                
-                // Check all possible relation fields
-                has_relations: !!asset?.relations,
-                relations_count: asset?.relations?.length || 0,
-                relations_sample: asset?.relations?.slice(0, 3),
-                
-                has_related_items: !!asset?.related_items,
-                related_items_count: asset?.related_items?.length || 0,
-                related_items_sample: asset?.related_items?.slice(0, 3),
-                
-                has_related_assets: !!asset?.related_assets,
-                related_assets_count: asset?.related_assets?.length || 0,
-                
-                has_associations: !!asset?.associations,
-                associations_count: asset?.associations?.length || 0,
-                
-                // Show all keys in the asset object
-                all_keys: Object.keys(asset || {}),
-                
-                // Check if there are any keys containing 'relat'
-                relation_keys: Object.keys(asset || {}).filter(key => 
-                    key.toLowerCase().includes('relat') || 
-                    key.toLowerCase().includes('assoc') ||
-                    key.toLowerCase().includes('link')
-                )
-            };
-            
-            res.status(200).json(debugInfo);
-            return;
-            
-        } catch (error) {
-            res.status(200).json({ 
-                error: error.message,
-                hint: 'Use ?debug_asset=ASSET_ID'
-            });
-            return;
-        }
-    }
-    
-    // Test company assets endpoint
-    if (req.method === 'GET' && req.query.debug_company) {
-        try {
-            const companyId = req.query.debug_company;
-            const searchName = req.query.name || '';
-            
-            const response = await axios.get(`${HUDU_BASE_URL}/api/v1/companies/${companyId}/assets`, {
-                headers: { 'x-api-key': HUDU_API_KEY },
-                params: { 
-                    page_size: 250,
-                    archived: false
-                }
-            });
-            
-            const allAssets = response.data?.assets || [];
-            
-            // Group by asset type
-            const assetTypes = {};
-            allAssets.forEach(asset => {
-                const type = asset.asset_type || 'Unknown';
-                if (!assetTypes[type]) {
-                    assetTypes[type] = [];
-                }
-                assetTypes[type].push({
-                    id: asset.id,
-                    name: asset.name
-                });
-            });
-            
-            // If name provided, filter assets
-            let matchingAssets = [];
-            if (searchName) {
-                const searchLower = searchName.toLowerCase();
-                matchingAssets = allAssets.filter(asset => {
-                    const assetName = (asset.name || '').toLowerCase();
-                    
-                    // Check name
-                    if (assetName.includes(searchLower)) return true;
-                    
-                    // Check fields
-                    if (asset.fields) {
-                        for (const field of asset.fields) {
-                            const value = (field.value || '').toString().toLowerCase();
-                            if (value.includes(searchLower)) return true;
-                        }
-                    }
-                    
-                    return false;
-                });
-            }
-            
-            res.status(200).json({
-                company_id: companyId,
-                total_assets: allAssets.length,
-                asset_types: assetTypes,
-                search_name: searchName,
-                matching_assets: matchingAssets.map(a => ({
-                    id: a.id,
-                    name: a.name,
-                    type: a.asset_type
-                }))
-            });
-            return;
-            
-        } catch (error) {
-            res.status(200).json({ 
-                error: error.message,
-                hint: 'Use ?debug_company=COMPANY_ID&name=SEARCH_NAME'
-            });
-            return;
-        }
-    }
-    
-    // Normal GET test
+    // Handle GET requests - for testing
     if (req.method === 'GET') {
+        const testMessage = `
+            <div style='padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 8px;'>
+                <h3>✅ Hudu-BoldDesk Integration Active</h3>
+                <p>Version 5.0 - Fixed</p>
+                <p style='font-size: 11px;'>Time: ${new Date().toLocaleString()}</p>
+            </div>
+        `;
+        
         res.status(200).json({
-            "message": `
-                <div style='padding: 15px; background: #4f46e5; color: white; border-radius: 8px;'>
-                    <h3>🔍 Debug Version Active</h3>
-                    <p style='font-size: 12px;'>Debug endpoints:</p>
-                    <ul style='font-size: 11px; margin: 5px 0;'>
-                        <li>GET ?debug_asset=ASSET_ID - Check asset relations</li>
-                        <li>GET ?debug_company=COMPANY_ID&name=NAME - Check company assets</li>
-                    </ul>
-                </div>
-            `,
+            "message": testMessage,
             "statusCode": "200"
         });
         return;
     }
     
-    // Handle POST with extra debugging
+    // Handle POST requests
     if (req.method === 'POST') {
         try {
-            // Extract email
+            // Extract email from request
             let email = req.body?.requester?.EmailId ||
                        req.body?.requester?.email ||
                        req.body?.customer?.EmailId ||
@@ -166,243 +44,449 @@ module.exports = async (req, res) => {
                        req.body?.email ||
                        null;
             
-            console.log('=== DEBUG START ===');
-            console.log('Email:', email);
+            console.log('Processing request for email:', email);
             
-            if (!email || !HUDU_API_KEY || !HUDU_BASE_URL) {
+            // Check requirements
+            if (!email) {
                 res.status(200).json({
-                    "message": `<div style='color: red;'>Missing: ${!email ? 'Email' : ''} ${!HUDU_API_KEY ? 'API Key' : ''} ${!HUDU_BASE_URL ? 'Base URL' : ''}</div>`,
+                    "message": `<div style='color: #dc2626; padding: 15px;'>❌ לא נמצא email בבקשה</div>`,
                     "statusCode": "200"
                 });
                 return;
             }
             
-            // Search for customer
+            if (!HUDU_API_KEY || !HUDU_BASE_URL) {
+                res.status(200).json({
+                    "message": `<div style='color: #dc2626; padding: 15px;'>❌ חסרים הגדרות API</div>`,
+                    "statusCode": "200"
+                });
+                return;
+            }
+            
+            // Step 1: Search for customer by email
+            console.log('Searching for customer...');
             const searchResponse = await axios.get(`${HUDU_BASE_URL}/api/v1/assets`, {
-                headers: { 'x-api-key': HUDU_API_KEY },
-                params: { search: email, page_size: 50 }
+                headers: { 
+                    'x-api-key': HUDU_API_KEY,
+                    'Content-Type': 'application/json'
+                },
+                params: { 
+                    search: email,
+                    page_size: 50
+                }
             });
             
-            const allAssets = searchResponse.data?.assets || [];
-            console.log(`Found ${allAssets.length} assets in search`);
+            const searchResults = searchResponse.data?.assets || [];
+            console.log(`Found ${searchResults.length} assets in search`);
             
-            // Find customer
-            const customerAsset = allAssets.find(asset => {
+            // Find the customer asset - handle both Mazkirut Goz and כרמלית לוי cases
+            let customerAsset = null;
+            let customerName = null;
+            
+            // First try to find People/Person/Contact asset
+            for (const asset of searchResults) {
                 const assetType = (asset.asset_type || '').toLowerCase();
-                return assetType.includes('people') || 
-                       assetType.includes('person') || 
-                       assetType.includes('contact');
-            });
+                
+                if (assetType.includes('people') || 
+                    assetType.includes('person') || 
+                    assetType.includes('contact') ||
+                    assetType.includes('user')) {
+                    customerAsset = asset;
+                    customerName = asset.name;
+                    console.log(`Found customer by type: ${customerName} (ID: ${asset.id})`);
+                    break;
+                }
+            }
+            
+            // If not found by type, look for the asset with the email
+            if (!customerAsset) {
+                for (const asset of searchResults) {
+                    if (asset.fields && Array.isArray(asset.fields)) {
+                        for (const field of asset.fields) {
+                            const fieldValue = (field.value || '').toString().toLowerCase().trim();
+                            if (fieldValue === email.toLowerCase().trim()) {
+                                customerAsset = asset;
+                                customerName = asset.name;
+                                console.log(`Found customer by email field: ${customerName} (ID: ${asset.id})`);
+                                break;
+                            }
+                        }
+                    }
+                    if (customerAsset) break;
+                }
+            }
+            
+            // If still not found, use the first result
+            if (!customerAsset && searchResults.length > 0) {
+                customerAsset = searchResults[0];
+                customerName = customerAsset.name;
+                console.log(`Using first search result: ${customerName} (ID: ${customerAsset.id})`);
+            }
             
             if (!customerAsset) {
                 res.status(200).json({
-                    "message": `<div style='color: red;'>לא נמצא לקוח עם המייל: ${email}</div>`,
+                    "message": `<div style='color: #dc2626; padding: 15px;'>❌ לא נמצא לקוח עם המייל: ${email}</div>`,
                     "statusCode": "200"
                 });
                 return;
             }
             
-            console.log(`Customer: ${customerAsset.name} (ID: ${customerAsset.id})`);
-            
-            // Get detailed customer - CHECK FOR RELATIONS HERE
+            // Try to get detailed customer info (but don't fail if 404)
             let detailedCustomer = customerAsset;
-            let embeddedRelations = [];
-            
             try {
                 const detailResponse = await axios.get(`${HUDU_BASE_URL}/api/v1/assets/${customerAsset.id}`, {
-                    headers: { 'x-api-key': HUDU_API_KEY }
+                    headers: { 
+                        'x-api-key': HUDU_API_KEY,
+                        'Content-Type': 'application/json'
+                    }
                 });
                 
                 if (detailResponse.data?.asset) {
                     detailedCustomer = detailResponse.data.asset;
-                    
-                    // LOG ALL POSSIBLE RELATION FIELDS
-                    console.log('=== CHECKING FOR RELATIONS ===');
-                    console.log('Has relations?', !!detailedCustomer.relations);
-                    console.log('Has related_items?', !!detailedCustomer.related_items);
-                    console.log('Has related_assets?', !!detailedCustomer.related_assets);
-                    console.log('Has associations?', !!detailedCustomer.associations);
-                    console.log('All keys:', Object.keys(detailedCustomer));
-                    
-                    // Try to get relations from any field
-                    embeddedRelations = detailedCustomer.relations || 
-                                       detailedCustomer.related_items || 
-                                       detailedCustomer.related_assets || 
-                                       detailedCustomer.associations || 
-                                       [];
-                    
-                    console.log(`Embedded relations count: ${embeddedRelations.length}`);
-                    if (embeddedRelations.length > 0) {
-                        console.log('Sample relation:', JSON.stringify(embeddedRelations[0], null, 2));
-                    }
+                    console.log('Got detailed customer data');
                 }
-            } catch (error) {
-                console.log('Error getting detailed customer:', error.message);
+            } catch (detailError) {
+                console.log('Could not get detailed customer (404 or other error) - using basic data');
+                // Continue with basic customer data
             }
             
-            // Get company assets
-            let relatedAssets = [];
-            const customerName = detailedCustomer.name.toLowerCase().trim();
-            const nameParts = customerName.split(/\s+/);
+            // Extract name parts for matching
+            const fullName = normalizeText(customerName || detailedCustomer.name);
+            const nameParts = fullName.split(/\s+/);
             const firstName = nameParts[0];
             const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
             
-            console.log('=== SEARCHING COMPANY ASSETS ===');
-            console.log('Customer name:', customerName);
-            console.log('First name:', firstName);
-            console.log('Last name:', lastName);
+            console.log('Customer name analysis:', { 
+                original: customerName,
+                normalized: fullName,
+                firstName,
+                lastName
+            });
+            
+            // Step 2: Get all company assets
+            let relatedAssets = [];
+            const searchMethods = [];
             
             try {
+                console.log('Getting company assets...');
                 const companyResponse = await axios.get(`${HUDU_BASE_URL}/api/v1/companies/${detailedCustomer.company_id}/assets`, {
-                    headers: { 'x-api-key': HUDU_API_KEY },
-                    params: { page_size: 250, archived: false }
+                    headers: { 
+                        'x-api-key': HUDU_API_KEY,
+                        'Content-Type': 'application/json'
+                    },
+                    params: { 
+                        page_size: 250,
+                        archived: false
+                    }
                 });
                 
                 const companyAssets = companyResponse.data?.assets || [];
-                console.log(`Company has ${companyAssets.length} total assets`);
+                console.log(`Found ${companyAssets.length} assets in company`);
                 
-                // Log asset types in company
-                const typeCount = {};
-                companyAssets.forEach(a => {
-                    const type = a.asset_type || 'Unknown';
-                    typeCount[type] = (typeCount[type] || 0) + 1;
+                // Count asset types
+                const assetTypeCount = {};
+                companyAssets.forEach(asset => {
+                    const type = asset.asset_type || 'Unknown';
+                    assetTypeCount[type] = (assetTypeCount[type] || 0) + 1;
                 });
-                console.log('Asset types in company:', typeCount);
+                console.log('Asset types:', assetTypeCount);
                 
-                // Find related assets
+                // Check each asset for relation to customer
                 for (const asset of companyAssets) {
+                    // Skip the customer asset itself
                     if (asset.id === customerAsset.id) continue;
                     
+                    // Skip other people/contact assets
                     const assetType = (asset.asset_type || '').toLowerCase();
-                    if (assetType.includes('people') || assetType.includes('person')) continue;
-                    
-                    const assetName = (asset.name || '').toLowerCase();
-                    let matchFound = false;
-                    let matchReason = '';
-                    
-                    // Check various matching criteria
-                    if (customerName && assetName === customerName) {
-                        matchFound = true;
-                        matchReason = 'Exact name match';
-                    } else if (customerName && assetName.includes(customerName)) {
-                        matchFound = true;
-                        matchReason = 'Full name match';
-                    } else if (firstName && firstName.length > 2 && assetName.includes(firstName)) {
-                        matchFound = true;
-                        matchReason = `Contains "${firstName}"`;
-                    } else if (lastName && lastName.length > 2 && assetName.includes(lastName)) {
-                        matchFound = true;
-                        matchReason = `Contains "${lastName}"`;
+                    if (assetType.includes('people') || 
+                        assetType.includes('person') || 
+                        assetType.includes('contact') ||
+                        assetType === 'contact in atera') {
+                        continue;
                     }
                     
-                    // Check fields
-                    if (!matchFound && asset.fields) {
+                    const assetNameNorm = normalizeText(asset.name);
+                    let matchFound = false;
+                    let matchReason = '';
+                    let confidence = 'low';
+                    
+                    // Priority 1: Exact or full name match
+                    if (fullName && (assetNameNorm === fullName || assetNameNorm.includes(fullName))) {
+                        matchFound = true;
+                        matchReason = 'Full name match';
+                        confidence = 'high';
+                    }
+                    // Priority 2: Contains both first and last name (even not together)
+                    else if (firstName && lastName && 
+                             assetNameNorm.includes(firstName) && 
+                             assetNameNorm.includes(lastName)) {
+                        matchFound = true;
+                        matchReason = 'First + Last name';
+                        confidence = 'high';
+                    }
+                    // Priority 3: First name match (strong indicator)
+                    else if (firstName && firstName.length > 2 && assetNameNorm.includes(firstName)) {
+                        matchFound = true;
+                        matchReason = `Contains "${firstName}"`;
+                        confidence = 'medium';
+                    }
+                    // Priority 4: Last name match
+                    else if (lastName && lastName.length > 2 && assetNameNorm.includes(lastName)) {
+                        matchFound = true;
+                        matchReason = `Contains "${lastName}"`;
+                        confidence = 'medium';
+                    }
+                    
+                    // Check fields for email or name match
+                    if (!matchFound && asset.fields && Array.isArray(asset.fields)) {
                         for (const field of asset.fields) {
-                            const fieldValue = (field.value || '').toString().toLowerCase();
+                            const fieldValueNorm = normalizeText(field.value);
                             
-                            if (email && fieldValue.includes(email.toLowerCase())) {
+                            // Check for email match
+                            if (email && field.value && field.value.toString().toLowerCase().includes(email.toLowerCase())) {
                                 matchFound = true;
                                 matchReason = `Email in ${field.label}`;
+                                confidence = 'high';
                                 break;
                             }
                             
-                            if (customerName && fieldValue.includes(customerName)) {
+                            // Check for name in fields
+                            if (fullName && fieldValueNorm.includes(fullName)) {
                                 matchFound = true;
                                 matchReason = `Name in ${field.label}`;
+                                confidence = 'high';
+                                break;
+                            }
+                            
+                            // Check for first name in fields (like "Assigned to")
+                            if (firstName && firstName.length > 2 && fieldValueNorm.includes(firstName)) {
+                                matchFound = true;
+                                matchReason = `"${firstName}" in ${field.label}`;
+                                confidence = 'medium';
                                 break;
                             }
                         }
                     }
                     
+                    // Special handling for specific asset types
+                    if (!matchFound) {
+                        // Email 365 assets - might not have the name but could be related
+                        if (assetType.includes('email') || assetType.includes('365') || assetType.includes('office')) {
+                            // Check if it's in a small company (likely user's email)
+                            if (companyAssets.length <= 30) {
+                                // Check if there's any name part match
+                                if ((firstName && assetNameNorm.includes(firstName)) ||
+                                    (lastName && assetNameNorm.includes(lastName))) {
+                                    matchFound = true;
+                                    matchReason = 'Email asset - name part match';
+                                    confidence = 'medium';
+                                }
+                            }
+                        }
+                        
+                        // Licenses, Passwords - often assigned to users
+                        if (assetType.includes('license') || 
+                            assetType.includes('password') || 
+                            assetType.includes('credential')) {
+                            if ((firstName && assetNameNorm.includes(firstName)) ||
+                                (lastName && assetNameNorm.includes(lastName))) {
+                                matchFound = true;
+                                matchReason = `${assetType} - name match`;
+                                confidence = 'medium';
+                            }
+                        }
+                    }
+                    
+                    // For very small companies, include user-type assets
+                    if (!matchFound && companyAssets.length <= 15) {
+                        const userAssetTypes = ['computer', 'laptop', 'email', 'phone', 'printer', 
+                                              'license', 'password', '365', 'office', 'mobile'];
+                        if (userAssetTypes.some(type => assetType.includes(type))) {
+                            matchFound = true;
+                            matchReason = 'User asset - small company';
+                            confidence = 'low';
+                        }
+                    }
+                    
                     if (matchFound) {
-                        console.log(`MATCH: ${asset.name} (${asset.asset_type}) - Reason: ${matchReason}`);
+                        console.log(`MATCH: ${asset.name} (${asset.asset_type}) - ${matchReason}`);
                         relatedAssets.push({
                             ...asset,
-                            match_reason: matchReason
+                            match_method: 'Smart Match',
+                            match_reason: matchReason,
+                            confidence: confidence
                         });
                     }
                 }
                 
-                console.log(`=== FOUND ${relatedAssets.length} RELATED ASSETS ===`);
+                if (relatedAssets.length > 0) {
+                    searchMethods.push('Smart Match');
+                }
                 
             } catch (error) {
                 console.log('Error getting company assets:', error.message);
             }
             
-            // Process embedded relations if found
-            if (embeddedRelations.length > 0) {
-                console.log('=== PROCESSING EMBEDDED RELATIONS ===');
-                for (const relation of embeddedRelations) {
-                    try {
-                        // Try different formats
-                        let relatedId = relation.id || relation.asset_id || relation.related_id;
-                        
-                        if (relatedId && relatedId !== customerAsset.id) {
-                            const assetResponse = await axios.get(`${HUDU_BASE_URL}/api/v1/assets/${relatedId}`, {
-                                headers: { 'x-api-key': HUDU_API_KEY }
-                            });
-                            
-                            if (assetResponse.data?.asset) {
-                                const asset = assetResponse.data.asset;
-                                console.log(`EMBEDDED: ${asset.name} (${asset.asset_type})`);
-                                
-                                // Add if not already in list
-                                if (!relatedAssets.find(a => a.id === asset.id)) {
-                                    relatedAssets.push({
-                                        ...asset,
-                                        match_reason: 'Linked in Hudu'
-                                    });
-                                }
-                            }
-                        }
-                    } catch (error) {
-                        console.log('Error fetching embedded relation:', error.message);
-                    }
-                }
-            }
+            // Sort assets by confidence (high -> medium -> low)
+            relatedAssets.sort((a, b) => {
+                const order = { 'high': 3, 'medium': 2, 'low': 1 };
+                return (order[b.confidence] || 0) - (order[a.confidence] || 0);
+            });
             
-            console.log('=== DEBUG END ===');
+            console.log(`Total found: ${relatedAssets.length} related assets`);
             
-            // Generate response
+            // Generate HTML response
             const htmlMessage = `
-                <div style='font-family: Arial, sans-serif; font-size: 13px;'>
-                    <div style='background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 15px; border-radius: 8px 8px 0 0; margin: -10px -10px 0 -10px;'>
-                        <div style='font-size: 18px; font-weight: 600;'>👤 ${detailedCustomer.name}</div>
-                        <div style='font-size: 11px; opacity: 0.9; margin-top: 5px;'>
+                <div style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; font-size: 13px;'>
+                    <style>
+                        .header { 
+                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                            color: white; 
+                            padding: 15px; 
+                            border-radius: 8px 8px 0 0; 
+                            margin: -10px -10px 0 -10px; 
+                        }
+                        .customer-name { 
+                            font-size: 18px; 
+                            font-weight: 600; 
+                            margin: 0 0 5px 0; 
+                        }
+                        .content { 
+                            padding: 15px; 
+                            background: #f8f9fa; 
+                            border-radius: 0 0 8px 8px; 
+                            margin: 0 -10px -10px -10px; 
+                        }
+                        .asset-item { 
+                            background: white; 
+                            border-radius: 6px; 
+                            padding: 12px; 
+                            margin: 8px 0; 
+                            border: 1px solid #dee2e6; 
+                            transition: all 0.2s;
+                        }
+                        .asset-item:hover {
+                            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                        }
+                        .asset-name { 
+                            font-weight: 600; 
+                            color: #212529; 
+                            margin-bottom: 4px; 
+                        }
+                        .asset-type { 
+                            display: inline-block;
+                            background: #0ea5e9; 
+                            color: white; 
+                            padding: 2px 6px; 
+                            border-radius: 8px; 
+                            font-size: 10px; 
+                            margin-right: 4px;
+                        }
+                        .confidence-high { 
+                            background: #10b981; 
+                            color: white; 
+                            padding: 2px 6px; 
+                            border-radius: 8px; 
+                            font-size: 10px; 
+                        }
+                        .confidence-medium { 
+                            background: #f59e0b; 
+                            color: white; 
+                            padding: 2px 6px; 
+                            border-radius: 8px; 
+                            font-size: 10px; 
+                        }
+                        .confidence-low { 
+                            background: #6b7280; 
+                            color: white; 
+                            padding: 2px 6px; 
+                            border-radius: 8px; 
+                            font-size: 10px; 
+                        }
+                        .hudu-link {
+                            background: #667eea;
+                            color: white;
+                            text-decoration: none;
+                            padding: 8px 16px;
+                            border-radius: 6px;
+                            font-size: 12px;
+                            display: inline-block;
+                            margin-top: 10px;
+                        }
+                        .hudu-link:hover {
+                            background: #5a67d8;
+                        }
+                    </style>
+                    
+                    <div class='header'>
+                        <div class='customer-name'>👤 ${customerName || detailedCustomer.name}</div>
+                        <div style='font-size: 11px; opacity: 0.9;'>
                             ${detailedCustomer.company_name || 'Company'} | 
-                            נמצאו: ${relatedAssets.length} נכסים | 
-                            Embedded: ${embeddedRelations.length}
+                            Found: ${relatedAssets.length} items
                         </div>
                     </div>
                     
-                    <div style='padding: 15px; background: #f8f9fa; border-radius: 0 0 8px 8px; margin: 0 -10px -10px -10px;'>
+                    <div class='content'>
+                        ${detailedCustomer.fields && detailedCustomer.fields.length > 0 ? `
+                            <div style='background: white; border-radius: 6px; padding: 10px; margin-bottom: 15px; border: 1px solid #dee2e6;'>
+                                <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px;'>
+                                    ${detailedCustomer.fields.filter(f => f.value).slice(0, 4).map(field => `
+                                        <div style='font-size: 11px;'>
+                                            <div style='color: #6c757d; font-size: 10px;'>${field.label}</div>
+                                            <div style='color: #212529; font-weight: 500;'>${field.value}</div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                        
                         <h3 style='font-size: 14px; margin: 0 0 10px 0;'>
                             🔗 נכסים קשורים (${relatedAssets.length})
                         </h3>
                         
-                        ${relatedAssets.map(item => `
-                            <div style='background: white; border-radius: 6px; padding: 10px; margin: 8px 0; border: 1px solid #dee2e6;'>
-                                <div style='font-weight: 600; color: #212529;'>${item.name}</div>
-                                <div style='font-size: 11px; color: #6c757d; margin-top: 4px;'>
-                                    <span style='background: #0ea5e9; color: white; padding: 2px 6px; border-radius: 6px; margin-right: 4px;'>
-                                        ${item.asset_type}
-                                    </span>
-                                    <span style='background: #10b981; color: white; padding: 2px 6px; border-radius: 6px;'>
-                                        ${item.match_reason}
-                                    </span>
+                        ${relatedAssets.length > 0 ? relatedAssets.map(item => {
+                            let icon = '📄';
+                            const type = (item.asset_type || '').toLowerCase();
+                            
+                            if (type.includes('computer') || type.includes('laptop')) icon = '💻';
+                            else if (type.includes('email') || type.includes('365') || type.includes('office')) icon = '📧';
+                            else if (type.includes('print')) icon = '🖨️';
+                            else if (type.includes('password') || type.includes('credential')) icon = '🔐';
+                            else if (type.includes('license')) icon = '🔑';
+                            else if (type.includes('phone') || type.includes('mobile')) icon = '📱';
+                            else if (type.includes('server')) icon = '🖥️';
+                            else if (type.includes('wireless') || type.includes('wifi')) icon = '📶';
+                            
+                            return `
+                                <div class='asset-item'>
+                                    <div class='asset-name'>${icon} ${item.name || 'Unnamed'}</div>
+                                    <div style='margin-top: 4px;'>
+                                        <span class='asset-type'>${item.asset_type || 'Asset'}</span>
+                                        <span class='confidence-${item.confidence || 'low'}'>${item.match_reason || 'Related'}</span>
+                                    </div>
+                                    ${item.fields && item.fields.length > 0 ? `
+                                        <div style='margin-top: 8px; font-size: 11px; color: #6c757d;'>
+                                            ${item.fields.filter(f => f.value).slice(0, 2).map(f => 
+                                                `${f.label}: ${f.value}`
+                                            ).join(' | ')}
+                                        </div>
+                                    ` : ''}
                                 </div>
+                            `;
+                        }).join('') : `
+                            <div style='text-align: center; padding: 30px; color: #6c757d; background: white; border-radius: 8px; border: 2px dashed #dee2e6;'>
+                                <div style='font-size: 32px; margin-bottom: 10px;'>🔍</div>
+                                <div style='font-size: 14px; font-weight: 600;'>לא נמצאו נכסים קשורים</div>
+                                <div style='font-size: 12px; margin-top: 5px;'>נסה לבדוק את ההגדרות ב-Hudu</div>
                             </div>
-                        `).join('')}
+                        `}
                         
-                        ${relatedAssets.length === 0 ? `
-                            <div style='text-align: center; padding: 20px; color: #6c757d;'>
-                                🔍 לא נמצאו נכסים קשורים<br>
-                                <span style='font-size: 11px;'>Embedded relations: ${embeddedRelations.length}</span>
-                            </div>
-                        ` : ''}
-                        
-                        <div style='margin-top: 15px; padding-top: 10px; border-top: 1px solid #dee2e6; font-size: 11px; color: #6c757d;'>
-                            Debug: Check console for detailed logs
+                        <div style='text-align: center; margin-top: 20px; padding-top: 15px; border-top: 1px solid #dee2e6;'>
+                            <a href='${HUDU_BASE_URL}/a/${detailedCustomer.company_id}/assets/${customerAsset.id}' 
+                               target='_blank' 
+                               class='hudu-link'>
+                                פתח פרופיל לקוח ב-Hudu →
+                            </a>
                         </div>
                     </div>
                 </div>
@@ -413,12 +497,20 @@ module.exports = async (req, res) => {
                 "statusCode": "200"
             });
             
+            console.log('Response sent successfully');
+            
         } catch (error) {
-            console.error('ERROR:', error);
+            console.error('Main error:', error);
+            
             res.status(200).json({
-                "message": `<div style='color: red;'>Error: ${error.message}</div>`,
+                "message": `<div style='color: #dc2626; padding: 15px;'>❌ שגיאה: ${error.message}</div>`,
                 "statusCode": "500"
             });
         }
+    } else {
+        res.status(405).json({ 
+            error: 'Method not allowed',
+            allowed: ['GET', 'POST']
+        });
     }
 };
